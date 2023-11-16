@@ -617,25 +617,15 @@ struct __partially_static_sizes_tagged
   using __tag_t = _Tag;
   using __psa_impl_t = __standard_layout_psa<
       _Tag, T, _static_t, _CUDA_VSTD::integer_sequence<_static_t, __values_or_sentinals...>>;
-#if defined(_CCCL_COMPILER_NVRTC) \
- || defined(_LIBCUDACXX_CUDACC_BELOW_11_3)
-  template<class... _Args, __enable_if_t<_LIBCUDACXX_TRAIT(is_constructible, __psa_impl_t, _Args...), int> = 0>
-  __MDSPAN_FORCE_INLINE_FUNCTION constexpr
-  __partially_static_sizes_tagged(_Args&&... __args) noexcept(noexcept(__psa_impl_t(_CUDA_VSTD::declval<_Args>()...)))
-      : __psa_impl_t(_CUDA_VSTD::forward<_Args>(__args)...)
-  {}
-#else // ^^^ _CCCL_COMPILER_NVRTC || nvcc < 11.3 ^^^ / vvv !_CCCL_COMPILER_NVRTC || nvcc >= 11.3 vvv
-  using __psa_impl_t::__psa_impl_t;
-#endif // !_CCCL_COMPILER_NVRTC || nvcc >= 11.3
-#ifdef __MDSPAN_DEFAULTED_CONSTRUCTORS_INHERITANCE_WORKAROUND
-  __MDSPAN_INLINE_FUNCTION
-#endif
-  constexpr __partially_static_sizes_tagged() noexcept
-#ifdef __MDSPAN_DEFAULTED_CONSTRUCTORS_INHERITANCE_WORKAROUND
-    : __psa_impl_t() { }
-#else
-    = default;
-#endif
+
+  _LIBCUDACXX_DELEGATE_CONSTRUCTORS(
+    __partially_static_sizes_tagged,
+    __standard_layout_psa,
+    _Tag,
+    T,
+    _static_t,
+    _CUDA_VSTD::integer_sequence<_static_t, __values_or_sentinals...>);
+
   __MDSPAN_INLINE_FUNCTION_DEFAULTED
   constexpr __partially_static_sizes_tagged(
       __partially_static_sizes_tagged const &) noexcept = default;
@@ -661,35 +651,23 @@ struct __no_tag {};
 template <class T, class _static_t, _static_t... __values_or_sentinals>
 struct __partially_static_sizes
     : __partially_static_sizes_tagged<__no_tag, T, _static_t, __values_or_sentinals...> {
+  _LIBCUDACXX_DELEGATE_CONSTRUCTORS(
+    __partially_static_sizes,
+    __partially_static_sizes_tagged,
+    __no_tag, T, _static_t, __values_or_sentinals...);
+
+  template <class _UTag>
+  __MDSPAN_FORCE_INLINE_FUNCTION constexpr __partially_static_sizes_tagged< _UTag, T, _static_t, __values_or_sentinals...>
+  __with_tag() const noexcept
+  {
+    return __partially_static_sizes_tagged<_UTag, T, _static_t, __values_or_sentinals...>(*this);
+  }
+
 private:
-  using __base_t =
-      __partially_static_sizes_tagged<__no_tag, T, _static_t, __values_or_sentinals...>;
   template <class _UTag>
   __MDSPAN_FORCE_INLINE_FUNCTION constexpr __partially_static_sizes(
     __partially_static_sizes_tagged<_UTag, T, _static_t, __values_or_sentinals...>&& __vals
-  ) noexcept : __base_t(_CUDA_VSTD::move(__vals)) { }
-public:
-#if defined(_CCCL_COMPILER_NVRTC) \
- || defined(_LIBCUDACXX_CUDACC_BELOW_11_3)
-  template<class... _Args, __enable_if_t<_LIBCUDACXX_TRAIT(is_constructible, __base_t, _Args...), int> = 0>
-  __MDSPAN_FORCE_INLINE_FUNCTION constexpr
-  __partially_static_sizes(_Args&&... __args) noexcept(noexcept(__base_t(_CUDA_VSTD::declval<_Args>()...)))
-      : __base_t(_CUDA_VSTD::forward<_Args>(__args)...)
-  {}
-#else // ^^^ _CCCL_COMPILER_NVRTC || nvcc < 11.3 ^^^ / vvv !_CCCL_COMPILER_NVRTC || nvcc >= 11.3 vvv
-  using __base_t::__base_t;
-#endif // !_CCCL_COMPILER_NVRTC || nvcc >= 11.3
-
-#ifdef __MDSPAN_DEFAULTED_CONSTRUCTORS_INHERITANCE_WORKAROUND
-  __MDSPAN_INLINE_FUNCTION
-  constexpr __partially_static_sizes() noexcept : __base_t() { }
-#endif
-  template <class _UTag>
-  __MDSPAN_FORCE_INLINE_FUNCTION constexpr __partially_static_sizes_tagged<
-      _UTag, T, _static_t, __values_or_sentinals...>
-  __with_tag() const noexcept {
-    return __partially_static_sizes_tagged<_UTag, T, _static_t, __values_or_sentinals...>(*this);
-  }
+  ) noexcept : __base(_CUDA_VSTD::move(__vals)) { }
 };
 
 #endif // __MDSPAN_PRESERVE_STATIC_LAYOUT
