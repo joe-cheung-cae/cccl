@@ -43,7 +43,7 @@ msvc2022: &msvc2022 { name: 'cl', version: '14.36', exe: 'cl++' }
 oneapi: &oneapi { name: 'oneapi', version: '2023.2.0', exe: 'icpc' }
 
 # nvhpc configs
-oneapi: &nvhpc { name: 'nvhpc', version: '24.1', exe: 'nvc++' }
+nvhpc: &nvhpc { name: 'nvhpc', version: '24.1', exe: 'nvc++' }
 
 # Each environment below will generate a unique build/test job
 # See the "compute-matrix" job in the workflow for how this is parsed and used
