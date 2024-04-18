@@ -22,6 +22,7 @@
 #endif // no system header
 
 #if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_CUDA_COMPILER_NVHPC)
+#  include <cuda_runtime.h>
 #  include <cuda_runtime_api.h>
 #endif // !_CCCL_CUDA_COMPILER_NVCC && !_CCCL_CUDA_COMPILER_NVHPC
 
@@ -46,32 +47,19 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
  *
  * See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
  *
- * A `cuda_async_memory_resource` can either hold a `cudaMemPool_t` or it can hold its own
- * `cuda_memory_pool` to use with cudaMallocAsync.
- *
- * There are different ways of constructing a `cuda_async_memory_resource`:
- *
- *   1. A default constructed `cuda_async_memory_resource` will hold the current default pool of the current device as
- *      obtained by `cudaDeviceGetDefaultMemPool`. The pool will not be released through `cudaMemPoolDestroy` on
- *      destruction. It is the responsibility of the user to ensure that the lifetime of the pool exceeds the lifetime
- *      of this `cuda_async_memory_resource`.
- *   2. A `cudaMemPool_t` can be provided to the constructor of `cuda_async_memory_resource`. The pool will not be
- *      released through `cudaMemPoolDestroy` on destruction. It is the responsibility of the user to ensure that the
- *      lifetime of the pool exceeds the lifetime of this `cuda_async_memory_resource`.
- *   3. If the initial pool size and optionally the release threshold and optionally the cudaMemAllocationHandleType is
- *      provided, `cuda_async_memory_resource` will construct its own `cuda_memory_pool`. The pool will be released
- *      through `cudaMemPoolDestroy` on destruction.
- *
+ * A `cuda_async_memory_resource` is a thin wrapper around a `cudaMemPool_t`. It does not own the pool and it is the
+ * responsibility of the user to ensure that the lifetime of the pool exceeds the lifetime of this
+ * `cuda_async_memory_resource`.
  */
 class cuda_async_memory_resource
 {
 private:
   union
   {
-    ::cudaMemPool_t __provided_pool_;
-    cuda_memory_pool __owned_pool_;
+    ::cudaMemPool_t __raw_pool_;
+    cuda_memory_pool& __cuda_pool_;
   };
-  bool __use_provided_pool_;
+  bool __use_raw_pool_;
 
   /**
    * @brief Checks whether the passed in alignment is valid
@@ -132,9 +120,9 @@ public:
    * @brief  Constructs the cuda_async_memory_resource ussing the default cudaMemPool_t of the current device
    * @throws cuda_error if retrieving the default cudaMemPool_t fails
    */
-  cuda_async_memory_resource(::cudaMemPool_t __provided_pool = __get_default_mem_pool())
-      : __provided_pool_(__provided_pool)
-      , __use_provided_pool_(true)
+  cuda_async_memory_resource(::cudaMemPool_t __provided_pool = __get_default_mem_pool()) noexcept
+      : __raw_pool_(__provided_pool)
+      , __use_raw_pool_(true)
   {}
 
   /**
@@ -150,29 +138,10 @@ public:
    * @param release_threshold Optional release threshold size in bytes of the pool. If no value is
    * provided, the release threshold is set to the total amount of memory on the current device.
    */
-  cuda_async_memory_resource(
-    const size_t initial_pool_size,
-    const size_t release_threshold                             = 0,
-    const cudaMemAllocationHandleType __allocation_handle_type = cudaMemAllocationHandleType::cudaMemHandleTypeNone)
-      : __owned_pool_(initial_pool_size, release_threshold, __allocation_handle_type)
-      , __use_provided_pool_(false)
+  cuda_async_memory_resource(cuda_memory_pool& __cuda_pool) noexcept
+      : __cuda_pool_(__cuda_pool)
+      , __use_raw_pool_(false)
   {}
-
-  cuda_async_memory_resource(cuda_async_memory_resource const&)            = delete;
-  cuda_async_memory_resource(cuda_async_memory_resource&&)                 = delete;
-  cuda_async_memory_resource& operator=(cuda_async_memory_resource const&) = delete;
-  cuda_async_memory_resource& operator=(cuda_async_memory_resource&&)      = delete;
-
-  /**
-   * @brief Releases the internal cudaMemPool_t if it was not user provided
-   */
-  ~cuda_async_memory_resource() noexcept
-  {
-    if (!__use_provided_pool_)
-    {
-      __owned_pool_.~cuda_memory_pool();
-    }
-  }
 
   /**
    * @brief Allocate device memory of size at least \p __bytes via cudaMallocFromPoolAsync.
@@ -351,7 +320,7 @@ public:
    */
   _CCCL_NODISCARD constexpr cudaMemPool_t pool_handle() const noexcept
   {
-    return __use_provided_pool_ ? __provided_pool_ : __owned_pool_.pool_handle();
+    return __use_raw_pool_ ? __raw_pool_ : __cuda_pool_.pool_handle();
   }
 
   /**
