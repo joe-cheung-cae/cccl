@@ -21,23 +21,23 @@
 #  pragma system_header
 #endif // no system header
 
-#if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_CUDA_COMPILER_NVHPC)
-#  include <cuda_runtime.h>
-#  include <cuda_runtime_api.h>
-#endif // !_CCCL_CUDA_COMPILER_NVCC && !_CCCL_CUDA_COMPILER_NVHPC
-
-#include <cuda/std/__memory/addressof.h>
-#include <cuda/__memory_resource/cuda_memory_pool.h>
-#include <cuda/__memory_resource/get_property.h>
-#include <cuda/__memory_resource/properties.h>
-#include <cuda/__memory_resource/resource.h>
-#include <cuda/__memory_resource/resource_ref.h>
-#include <cuda/std/__cuda/api_wrapper.h>
-#include <cuda/std/__new/bad_alloc.h>
-#include <cuda/stream_ref>
-
 // cudaMallocAsync was introduced in CTK 11.2
 #if !defined(_CCCL_COMPILER_MSVC_2017) && !defined(_CCCL_CUDACC_BELOW_11_2)
+
+#  if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_CUDA_COMPILER_NVHPC)
+#    include <cuda_runtime.h>
+#    include <cuda_runtime_api.h>
+#  endif // !_CCCL_CUDA_COMPILER_NVCC && !_CCCL_CUDA_COMPILER_NVHPC
+
+#  include <cuda/__memory_resource/cuda_memory_pool.h>
+#  include <cuda/__memory_resource/get_property.h>
+#  include <cuda/__memory_resource/properties.h>
+#  include <cuda/__memory_resource/resource.h>
+#  include <cuda/__memory_resource/resource_ref.h>
+#  include <cuda/std/__cuda/api_wrapper.h>
+#  include <cuda/std/__memory/addressof.h>
+#  include <cuda/std/__new/bad_alloc.h>
+#  include <cuda/stream_ref>
 
 #  if _CCCL_STD_VER >= 2014
 
