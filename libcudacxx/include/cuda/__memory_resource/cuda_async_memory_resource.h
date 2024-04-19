@@ -176,7 +176,7 @@ public:
    * @param __bytes  The number of bytes that was passed to the `allocate` call that returned \p __ptr.
    * @param __alignment The alignment that was passed to the `allocate` call that returned \p __ptr.
    */
-  void deallocate(void* __ptr, const size_t __bytes, const size_t __alignment = default_cuda_malloc_alignment)
+  void deallocate(void* __ptr, const size_t, const size_t __alignment = default_cuda_malloc_alignment)
   {
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
@@ -237,6 +237,7 @@ public:
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
                        "Invalid alignment passed to cuda_memory_resource::deallocate.");
     deallocate_async(__ptr, __bytes, __stream);
+    (void) __alignment;
   }
 
   /**
