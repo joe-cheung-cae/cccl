@@ -26,6 +26,7 @@
 #  include <cuda_runtime_api.h>
 #endif // !_CCCL_CUDA_COMPILER_NVCC && !_CCCL_CUDA_COMPILER_NVHPC
 
+#include <cuda/std/__memory/addressof.h>
 #include <cuda/__memory_resource/cuda_memory_pool.h>
 #include <cuda/__memory_resource/get_property.h>
 #include <cuda/__memory_resource/properties.h>
@@ -57,7 +58,7 @@ private:
   union
   {
     ::cudaMemPool_t __raw_pool_;
-    cuda_memory_pool& __cuda_pool_;
+    cuda_memory_pool* __cuda_pool_;
   };
   bool __use_raw_pool_;
 
@@ -139,7 +140,7 @@ public:
    * provided, the release threshold is set to the total amount of memory on the current device.
    */
   cuda_async_memory_resource(cuda_memory_pool& __cuda_pool) noexcept
-      : __cuda_pool_(__cuda_pool)
+      : __cuda_pool_(_CUDA_VSTD::addressof(__cuda_pool))
       , __use_raw_pool_(false)
   {}
 
@@ -320,7 +321,7 @@ public:
    */
   _CCCL_NODISCARD constexpr cudaMemPool_t pool_handle() const noexcept
   {
-    return __use_raw_pool_ ? __raw_pool_ : __cuda_pool_.pool_handle();
+    return __use_raw_pool_ ? __raw_pool_ : __cuda_pool_->pool_handle();
   }
 
   /**

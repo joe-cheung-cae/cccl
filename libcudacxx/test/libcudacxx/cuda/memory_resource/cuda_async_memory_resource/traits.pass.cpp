@@ -21,11 +21,11 @@ using resource = cuda::mr::cuda_async_memory_resource;
 static_assert(!cuda::std::is_trivial<resource>::value, "");
 static_assert(!cuda::std::is_trivially_default_constructible<resource>::value, "");
 static_assert(cuda::std::is_default_constructible<resource>::value, "");
-static_assert(!cuda::std::is_copy_constructible<resource>::value, "");
-static_assert(!cuda::std::is_move_constructible<resource>::value, "");
-static_assert(!cuda::std::is_copy_assignable<resource>::value, "");
-static_assert(!cuda::std::is_move_assignable<resource>::value, "");
-static_assert(!cuda::std::is_trivially_destructible<resource>::value, "");
+static_assert(cuda::std::is_copy_constructible<resource>::value, "");
+static_assert(cuda::std::is_move_constructible<resource>::value, "");
+static_assert(cuda::std::is_copy_assignable<resource>::value, "");
+static_assert(cuda::std::is_move_assignable<resource>::value, "");
+static_assert(cuda::std::is_trivially_destructible<resource>::value, "");
 static_assert(!cuda::std::is_empty<resource>::value, "");
 
 int main(int, char**)
