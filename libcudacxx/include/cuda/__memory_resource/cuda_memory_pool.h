@@ -33,7 +33,7 @@
 #  include <cuda/__memory_resource/resource.h>
 #  include <cuda/__memory_resource/resource_ref.h>
 #  include <cuda/std/__cuda/api_wrapper.h>
-#  include <cuda/std/detail/libcxx/include/__new/bad_alloc.h>
+#  include <cuda/std/__new/bad_alloc.h>
 #  include <cuda/stream_ref>
 
 #  if _CCCL_STD_VER >= 2014
@@ -275,7 +275,7 @@ public:
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to cuda_memory_pool::deallocate.");
     _CCCL_ASSERT_CUDA_API(::cudaFreeAsync, "cuda_memory_pool::deallocate failed", __ptr, ::cudaStream_t{0});
-    (void)__alignment;
+    (void) __alignment;
   }
 
   /**
@@ -329,7 +329,7 @@ public:
     // We need to ensure that the provided alignment matches the minimal provided alignment
     _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to cuda_memory_pool::deallocate.");
     _CCCL_ASSERT_CUDA_API(::cudaFreeAsync, "cuda_memory_pool::deallocate_async failed", __ptr, __stream.get());
-    (void)__alignment;
+    (void) __alignment;
   }
 
   /**
