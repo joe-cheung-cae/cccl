@@ -32,15 +32,15 @@ __host__ __device__ complex<T>::complex(const T& re)
 {}
 
 template <typename T>
-__host__ __device__ complex<T>::complex(const T& re, const T& im) : data{re, im} {}
-
+__host__ __device__ complex<T>::complex(const T& re, const T& im)
+    : data{re, im}
+{}
 
 template <typename T>
 template <typename U>
 __host__ __device__ complex<T>::complex(const complex<U>& z)
     : data{T(z.real()), T(z.imag())}
 {}
-
 
 template <typename T>
 __host__ THRUST_STD_COMPLEX_DEVICE complex<T>::complex(const std::complex<T>& z)
