@@ -53,7 +53,7 @@ bool ensure_export_handle(::cudaMemPool_t pool, const ::cudaMemAllocationHandleT
   const ::cudaError_t status = ::cudaMemPoolExportToShareableHandle(&handle, pool, allocation_handle, 0);
   ::cudaGetLastError(); // Clear CUDA error state
 
-  // If no export was defined we need to querry cudaErrorInvalidValue
+  // If no export was defined we need to query cudaErrorInvalidValue
   return allocation_handle == ::cudaMemHandleTypeNone ? status == ::cudaErrorInvalidValue : status == ::cudaSuccess;
 }
 
@@ -61,7 +61,7 @@ void test()
 {
   int current_device{};
   {
-    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to querry current device with with cudaGetDevice.", &current_device);
+    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to query current device with cudaGetDevice.", &current_device);
   }
 
   int driver_version = 0;

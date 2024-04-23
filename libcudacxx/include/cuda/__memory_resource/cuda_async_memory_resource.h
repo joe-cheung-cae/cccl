@@ -79,7 +79,7 @@ private:
   _CCCL_NODISCARD static int __get_current_cuda_device()
   {
     int __device = -1;
-    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to querry current device with with cudaGetDevice.", &__device);
+    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to query current device with cudaGetDevice.", &__device);
     return __device;
   }
 

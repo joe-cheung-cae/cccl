@@ -72,7 +72,7 @@ void test()
 {
   int current_device{};
   {
-    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to querry current device with with cudaGetDevice.", &current_device);
+    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to query current device with cudaGetDevice.", &current_device);
   }
 
   cuda::mr::cuda_async_memory_resource first{};
