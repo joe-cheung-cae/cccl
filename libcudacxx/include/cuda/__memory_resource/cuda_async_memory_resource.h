@@ -55,12 +55,7 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 class cuda_async_memory_resource
 {
 private:
-  union
-  {
-    ::cudaMemPool_t __raw_pool_;
-    cuda_memory_pool* __cuda_pool_;
-  };
-  bool __use_raw_pool_;
+  ::cudaMemPool_t __pool_;
 
   /**
    * @brief Checks whether the passed in alignment is valid
@@ -73,31 +68,21 @@ private:
 
 public:
   /**
-   * @brief  Constructs the cuda_async_memory_resource ussing the default cudaMemPool_t of the current device
+   * @brief  Constructs the cuda_async_memory_resource from a cudaMemPool_t. If none is provided it uses the default
+   * cudaMemPool_t of the current device
    * @throws cuda_error if retrieving the default cudaMemPool_t fails
    */
-  cuda_async_memory_resource(::cudaMemPool_t __provided_pool =
-                               _CUDA_VMR::__get_default_mem_pool(_CUDA_VMR::__get_current_cuda_device())) noexcept
-      : __raw_pool_(__provided_pool)
-      , __use_raw_pool_(true)
+  cuda_async_memory_resource(
+    ::cudaMemPool_t __pool = _CUDA_VMR::__get_default_mem_pool(_CUDA_VMR::__get_current_cuda_device()))
+      : __pool_(__pool)
   {}
 
   /**
-   * @brief Constructs a cuda_async_memory_resource with the optionally specified initial pool size
-   * and release threshold.
-   *
-   * If the pool size grows beyond the release threshold, unused memory held by the pool will be
-   * released at the next synchronization event.
-   *
-   * @throws ::cuda::cuda_error if the CUDA version does not support `cudaMallocAsync`
-   *
-   * @param initial_pool_size Initial size in bytes of the pool.
-   * @param release_threshold Optional release threshold size in bytes of the pool. If no value is
-   * provided, the release threshold is set to the total amount of memory on the current device.
+   * @brief  Constructs the cuda_async_memory_resource from a cuda_memory_pool by calling pool_handle()
+   * @throws cuda_error if retrieving the default cudaMemPool_t fails
    */
   cuda_async_memory_resource(cuda_memory_pool& __cuda_pool) noexcept
-      : __cuda_pool_(_CUDA_VSTD::addressof(__cuda_pool))
-      , __use_raw_pool_(false)
+      : __pool_(__cuda_pool.pool_handle())
   {}
 
   /**
@@ -121,7 +106,7 @@ public:
       "cuda_async_memory_resource::allocate failed to allocate with cudaMallocFromPoolAsync",
       &__ptr,
       __bytes,
-      pool_handle(),
+      __pool_,
       ::cudaStream_t{0});
     return __ptr;
   }
@@ -175,7 +160,7 @@ public:
       "cuda_async_memory_resource::allocate_async failed to allocate with cudaMallocFromPoolAsync",
       &__ptr,
       __bytes,
-      pool_handle(),
+      __pool_,
       __stream.get());
     return __ptr;
   }
@@ -213,7 +198,7 @@ public:
    */
   _CCCL_NODISCARD constexpr bool operator==(cuda_async_memory_resource const& __rhs) const noexcept
   {
-    return pool_handle() == __rhs.pool_handle();
+    return __pool_ == __rhs.__pool_;
   }
 #    if _CCCL_STD_VER <= 2017
   /**
@@ -222,7 +207,7 @@ public:
    */
   _CCCL_NODISCARD constexpr bool operator!=(cuda_async_memory_resource const& __rhs) const noexcept
   {
-    return pool_handle() != __rhs.pool_handle();
+    return __pool_ != __rhs.__pool_;
   }
 #    endif // _CCCL_STD_VER <= 2017
 
@@ -278,7 +263,7 @@ public:
    */
   _CCCL_NODISCARD constexpr cudaMemPool_t pool_handle() const noexcept
   {
-    return __use_raw_pool_ ? __raw_pool_ : __cuda_pool_->pool_handle();
+    return __pool_;
   }
 
   /**
