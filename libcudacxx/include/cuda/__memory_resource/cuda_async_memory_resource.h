@@ -127,7 +127,7 @@ public:
   }
 
   /**
-   * @brief Allocate device memory of size at least \p __bytes.
+   * @brief Allocate device memory of size at least \p __bytes via cudaMallocFromPoolAsync.
    * @param __bytes The size in bytes of the allocation.
    * @param __alignment The requested alignment of the allocation.
    * @param __stream Stream on which to perform allocation.
@@ -146,7 +146,7 @@ public:
   }
 
   /**
-   * @brief Allocate device memory of size at least \p __bytes.
+   * @brief Allocate device memory of size at least \p __bytes via cudaMallocFromPoolAsync.
    * @param __bytes The size in bytes of the allocation.
    * @param __stream Stream on which to perform allocation.
    * @throws cuda::cuda_error of the returned error code.
