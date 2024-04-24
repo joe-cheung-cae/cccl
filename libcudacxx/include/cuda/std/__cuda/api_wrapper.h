@@ -47,4 +47,53 @@
     (void) __status;                                   \
   }
 
+_LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
+
+/**
+ * @brief  Returns the device id of the current device
+ * @throws cuda_error if cudaGetDevice was not successful
+ * @returns The device id
+ */
+_CCCL_NODISCARD static int __get_current_cuda_device()
+{
+  int __device = -1;
+  _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to query current device with cudaGetDevice.", &__device);
+  return __device;
+}
+
+/**
+ * @brief  Checks whether the current device supports cudaMallocAsync
+ * @param __device_id The device id of the current device
+ * @throws cuda_error if cudaDeviceGetAttribute failed
+ * @returns true if cudaDevAttrMemoryPoolsSupported is not zero
+ */
+_CCCL_NODISCARD static bool __device_supports_pools(const int __device_id)
+{
+  int __pool_is_supported = 0;
+  _CCCL_TRY_CUDA_API(
+    ::cudaDeviceGetAttribute,
+    "Failed to call cudaDeviceGetAttribute",
+    &__pool_is_supported,
+    ::cudaDevAttrMemoryPoolsSupported,
+    __device_id);
+  return __pool_is_supported != 0;
+}
+
+/**
+ * @brief  Returns the default cudaMemPool_t from the current device
+ * @param __device_id The device id of the current device
+ * @throws cuda_error if retrieving the default cudaMemPool_t fails
+ * @returns The default memory pool of the current device
+ */
+_CCCL_NODISCARD static cudaMemPool_t __get_default_mem_pool(const int __device_id)
+{
+  _LIBCUDACXX_ASSERT(_CUDA_VMR::__device_supports_pools(__device_id), "cudaMallocAsync not supported");
+
+  ::cudaMemPool_t __pool;
+  _CCCL_TRY_CUDA_API(::cudaDeviceGetDefaultMemPool, "Failed to call cudaDeviceGetDefaultMemPool", &__pool, __device_id);
+  return __pool;
+}
+
+_LIBCUDACXX_END_NAMESPACE_CUDA_MR
+
 #endif //_CUDA__STD__CUDA_API_WRAPPER_H

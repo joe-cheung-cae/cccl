@@ -77,35 +77,6 @@ private:
   }
 
   /**
-   * @brief  Returns the device id for the current device
-   * @throws cuda_error if cudaGetDevice was not successful
-   * @returns The device id
-   */
-  _CCCL_NODISCARD static int __get_current_cuda_device()
-  {
-    int __device = -1;
-    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to querry current device with with cudaGetDevice.", &__device);
-    return __device;
-  }
-
-  /**
-   * @brief  Checks whether the current device supports cudaMallocAsync
-   * @throws cuda_error if cudaDeviceGetAttribute failed
-   * @returns true if cudaDevAttrMemoryPoolsSupported is not zero
-   */
-  _CCCL_NODISCARD static bool __device_supports_pools(const int __device_id)
-  {
-    int __pool_is_supported = 0;
-    _CCCL_TRY_CUDA_API(
-      ::cudaDeviceGetAttribute,
-      "Failed to call cudaDeviceGetAttribute",
-      &__pool_is_supported,
-      ::cudaDevAttrMemoryPoolsSupported,
-      __device_id);
-    return __pool_is_supported != 0;
-  }
-
-  /**
    * @brief Check whether the specified `cudaMemAllocationHandleType` is supported on the present
    * CUDA driver/runtime version.
    *
@@ -150,8 +121,8 @@ private:
     size_t __release_threshold,
     const cudaMemAllocationHandleType __allocation_handle_type) noexcept
   {
-    const int __device_id = __get_current_cuda_device();
-    _LIBCUDACXX_ASSERT(__device_supports_pools(__device_id), "cudaMallocAsync not supported");
+    const int __device_id = _CUDA_VMR::__get_current_cuda_device();
+    _LIBCUDACXX_ASSERT(_CUDA_VMR::__device_supports_pools(__device_id), "cudaMallocAsync not supported");
     _LIBCUDACXX_ASSERT(__cuda_supports_export_handle_type(__device_id, __allocation_handle_type),
                        "Requested IPC memory handle type not supported");
 
