@@ -19,57 +19,26 @@
 #include <cuda/std/cstdint>
 #include <cuda/stream_ref>
 
-enum class AccessibilityType
-{
-  Device,
-  Host,
-};
-
-template <AccessibilityType Accessibilty>
-struct resource
-{
-  void* allocate(size_t, size_t)
-  {
-    return nullptr;
-  }
-  void deallocate(void*, size_t, size_t) {}
-
-  bool operator==(const resource&) const
-  {
-    return true;
-  }
-  bool operator!=(const resource& other) const
-  {
-    return false;
-  }
-
-  template <AccessibilityType Accessibilty2                                         = Accessibilty,
-            cuda::std::enable_if_t<Accessibilty2 == AccessibilityType::Device, int> = 0>
-  friend void get_property(const resource&, cuda::mr::device_accessible) noexcept
-  {}
-};
-static_assert(cuda::mr::resource<resource<AccessibilityType::Host>>, "");
-static_assert(!cuda::mr::resource_with<resource<AccessibilityType::Host>, cuda::mr::device_accessible>, "");
-static_assert(cuda::mr::resource<resource<AccessibilityType::Device>>, "");
-static_assert(cuda::mr::resource_with<resource<AccessibilityType::Device>, cuda::mr::device_accessible>, "");
-
-template <AccessibilityType Accessibilty>
-struct async_resource : public resource<Accessibilty>
-{
-  void* allocate_async(size_t, size_t, cuda::stream_ref)
-  {
-    return nullptr;
-  }
-  void deallocate_async(void*, size_t, size_t, cuda::stream_ref) {}
-};
-static_assert(cuda::mr::async_resource<async_resource<AccessibilityType::Host>>, "");
-static_assert(!cuda::mr::async_resource_with<async_resource<AccessibilityType::Host>, cuda::mr::device_accessible>, "");
-static_assert(cuda::mr::async_resource<async_resource<AccessibilityType::Device>>, "");
-static_assert(cuda::mr::async_resource_with<async_resource<AccessibilityType::Device>, cuda::mr::device_accessible>,
-              "");
-
 void test()
 {
+  int current_device{};
+  {
+    _CCCL_TRY_CUDA_API(::cudaGetDevice, "Failed to querry current device with with cudaGetDevice.", &current_device);
+  }
+
+  int driver_version = 0;
+  {
+    _CCCL_TRY_CUDA_API(::cudaDriverGetVersion, "Failed to call cudaDriverGetVersion", &driver_version);
+  }
+
+  ::cudaMemPool_t current_default_pool{};
+  {
+    _CCCL_TRY_CUDA_API(::cudaDeviceGetDefaultMemPool,
+                       "Failed to call cudaDeviceGetDefaultMemPool",
+                       &current_default_pool,
+                       current_device);
+  }
+
   cuda::mr::cuda_memory_pool first{};
   { // comparison against a plain cuda_memory_pool
     cuda::mr::cuda_memory_pool second{};
@@ -77,96 +46,11 @@ void test()
     assert(first != second);
   }
 
-  { // comparison against a cuda_memory_pool wrapped inside a resource_ref<device_accessible>
-    cuda::mr::resource_ref<cuda::mr::device_accessible> first_ref{first};
-    assert(first == first_ref);
-    assert(!(first != first_ref));
-    assert(first_ref == first);
-    assert(!(first_ref != first));
-
-    // comparison against a different cuda_memory_pool wrapped inside a resource_ref<device_accessible>
-    cuda::mr::cuda_memory_pool second{};
-    cuda::mr::resource_ref<cuda::mr::device_accessible> second_ref{second};
-    assert(first != second_ref);
-    assert(!(first == second_ref));
-    assert(second_ref != first);
-    assert(!(second_ref == first));
-  }
-
-  { // comparison against a cuda_memory_pool wrapped inside a resource_ref<>
-    cuda::mr::resource_ref<> first_ref{first};
-    assert(first == first_ref);
-    assert(!(first != first_ref));
-    assert(first_ref == first);
-    assert(!(first_ref != first));
-
-    // comparison against a different cuda_memory_pool wrapped inside a resource_ref<>
-    cuda::mr::cuda_memory_pool second{};
-    cuda::mr::resource_ref<> second_ref{second};
-    assert(first != second_ref);
-    assert(!(first == second_ref));
-    assert(second_ref != first);
-    assert(!(second_ref == first));
-  }
-
-  { // comparison against a cuda_memory_pool wrapped inside a async_resource_ref<device_accessible>
-    cuda::mr::async_resource_ref<cuda::mr::device_accessible> first_ref{first};
-    assert(first == first_ref);
-    assert(!(first != first_ref));
-    assert(first_ref == first);
-    assert(!(first_ref != first));
-
-    // comparison against a different cuda_memory_pool wrapped inside a async_resource_ref<device_accessible>
-    cuda::mr::cuda_memory_pool second{};
-    cuda::mr::async_resource_ref<cuda::mr::device_accessible> second_ref{second};
-    assert(first != second_ref);
-    assert(!(first == second_ref));
-    assert(second_ref != first);
-    assert(!(second_ref == first));
-  }
-
-  { // comparison against a cuda_memory_pool wrapped inside a async_resource_ref<>
-    cuda::mr::async_resource_ref<> first_ref{first};
-    assert(first == first_ref);
-    assert(!(first != first_ref));
-    assert(first_ref == first);
-    assert(!(first_ref != first));
-
-    // comparison against a different cuda_memory_pool wrapped inside a async_resource_ref<device_accessible>
-    cuda::mr::cuda_memory_pool second{};
-    cuda::mr::async_resource_ref<> second_ref{second};
-    assert(first != second_ref);
-    assert(!(first == second_ref));
-    assert(second_ref != first);
-    assert(!(second_ref == first));
-  }
-
-  { // comparison against a different resource through resource_ref
-    resource<AccessibilityType::Host> host_resource{};
-    resource<AccessibilityType::Device> device_resource{};
-    assert(!(first == host_resource));
-    assert(first != host_resource);
-    assert(!(first == device_resource));
-    assert(first != device_resource);
-
-    assert(!(host_resource == first));
-    assert(host_resource != first);
-    assert(!(device_resource == first));
-    assert(device_resource != first);
-  }
-
-  { // comparison against a different async resource through resource_ref
-    async_resource<AccessibilityType::Host> host_async_resource{};
-    async_resource<AccessibilityType::Device> device_async_resource{};
-    assert(!(first == host_async_resource));
-    assert(first != host_async_resource);
-    assert(!(first == device_async_resource));
-    assert(first != device_async_resource);
-
-    assert(!(host_async_resource == first));
-    assert(host_async_resource != first);
-    assert(!(device_async_resource == first));
-    assert(device_async_resource != first);
+  { // comparison against a cudaMemPool_t
+    assert(first == first.pool_handle());
+    assert(first.pool_handle() == first);
+    assert(first != current_default_pool);
+    assert(current_default_pool != first);
   }
 }
 

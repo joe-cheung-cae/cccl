@@ -17,16 +17,16 @@
 #include <cuda/memory_resource>
 #include <cuda/std/type_traits>
 
-using resource = cuda::mr::cuda_memory_pool;
-static_assert(!cuda::std::is_trivial<resource>::value, "");
-static_assert(!cuda::std::is_trivially_default_constructible<resource>::value, "");
-static_assert(cuda::std::is_default_constructible<resource>::value, "");
-static_assert(!cuda::std::is_copy_constructible<resource>::value, "");
-static_assert(!cuda::std::is_move_constructible<resource>::value, "");
-static_assert(!cuda::std::is_copy_assignable<resource>::value, "");
-static_assert(!cuda::std::is_move_assignable<resource>::value, "");
-static_assert(!cuda::std::is_trivially_destructible<resource>::value, "");
-static_assert(!cuda::std::is_empty<resource>::value, "");
+using pool = cuda::mr::cuda_memory_pool;
+static_assert(!cuda::std::is_trivial<pool>::value, "");
+static_assert(!cuda::std::is_trivially_default_constructible<pool>::value, "");
+static_assert(cuda::std::is_default_constructible<pool>::value, "");
+static_assert(!cuda::std::is_copy_constructible<pool>::value, "");
+static_assert(!cuda::std::is_move_constructible<pool>::value, "");
+static_assert(!cuda::std::is_copy_assignable<pool>::value, "");
+static_assert(!cuda::std::is_move_assignable<pool>::value, "");
+static_assert(!cuda::std::is_trivially_destructible<pool>::value, "");
+static_assert(!cuda::std::is_empty<pool>::value, "");
 
 int main(int, char**)
 {

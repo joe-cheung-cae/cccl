@@ -58,7 +58,7 @@ enum class cudaMemAllocationHandleType
 };
 
 /**
- * @brief `cuda_memory_pool` uses cudaMallocAsync / cudaFreeAsync for allocation/deallocation.
+ * @brief `cuda_memory_pool` is a simple wrapper around a `cudaMemPool_t`
  *
  * See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
  */
@@ -66,15 +66,6 @@ class cuda_memory_pool
 {
 private:
   ::cudaMemPool_t __pool_handle_ = nullptr;
-
-  /**
-   * @brief Checks whether the passed in alignment is valid
-   * @returns true if the alignnment is valid
-   */
-  _CCCL_NODISCARD static constexpr bool __is_valid_alignment(const size_t __alignment) noexcept
-  {
-    return __alignment <= default_cuda_malloc_alignment && (default_cuda_malloc_alignment % __alignment == 0);
-  }
 
   /**
    * @brief Check whether the specified `cudaMemAllocationHandleType` is supported on the present
@@ -198,6 +189,11 @@ public:
       : __pool_handle_(__create_cuda_mempool(initial_pool_size, release_threshold, __allocation_handle_type))
   {}
 
+  /**
+   * @brief Disables construction from a plain `cudaMemPool_t`. We want to ensure clean ownership semantics
+   */
+  cuda_memory_pool(::cudaMemPool_t) = delete;
+
   cuda_memory_pool(cuda_memory_pool const&)            = delete;
   cuda_memory_pool(cuda_memory_pool&&)                 = delete;
   cuda_memory_pool& operator=(cuda_memory_pool const&) = delete;
@@ -209,110 +205,6 @@ public:
   ~cuda_memory_pool() noexcept
   {
     _CCCL_ASSERT_CUDA_API(::cudaMemPoolDestroy, "~cuda_memory_pool() failed to destroy pool", __pool_handle_);
-  }
-
-  /**
-   * @brief Allocate device memory of size at least \p __bytes via cudaMallocAsync.
-   * @param __bytes The size in bytes of the allocation.
-   * @param __alignment The requested alignment of the allocation.
-   * @throws cuda::std::bad_alloc in case of invalid alignment or cuda::cuda_error of the returned error code.
-   * @return Pointer to the newly allocated memory
-   */
-  _CCCL_NODISCARD void* allocate(const size_t __bytes, const size_t __alignment = default_cuda_malloc_alignment) const
-  {
-    // We need to ensure that the provided alignment matches the minimal provided alignment
-    if (!__is_valid_alignment(__alignment))
-    {
-      _CUDA_VSTD_NOVERSION::__throw_bad_alloc();
-    }
-
-    void* __ptr{nullptr};
-    _CCCL_TRY_CUDA_API(
-      ::cudaMallocAsync,
-      "cuda_memory_pool::allocate failed to allocate with cudaMallocAsync",
-      &__ptr,
-      __bytes,
-      ::cudaStream_t{0});
-    return __ptr;
-  }
-
-  /**
-   * @brief Deallocate memory pointed to by \p __ptr.
-   * @param __ptr Pointer to be deallocated. Must have been allocated through a call to `allocate`
-   * @param __bytes  The number of bytes that was passed to the `allocate` call that returned \p __ptr.
-   * @param __alignment The alignment that was passed to the `allocate` call that returned \p __ptr.
-   */
-  void deallocate(void* __ptr, const size_t, const size_t __alignment = default_cuda_malloc_alignment) const
-  {
-    // We need to ensure that the provided alignment matches the minimal provided alignment
-    _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to cuda_memory_pool::deallocate.");
-    _CCCL_ASSERT_CUDA_API(::cudaFreeAsync, "cuda_memory_pool::deallocate failed", __ptr, ::cudaStream_t{0});
-    (void) __alignment;
-  }
-
-  /**
-   * @brief Allocate device memory of size at least \p __bytes.
-   * @param __bytes The size in bytes of the allocation.
-   * @param __alignment The requested alignment of the allocation.
-   * @param __stream Stream on which to perform allocation.
-   * @throws cuda::std::bad_alloc in case of invalid alignment or cuda::cuda_error of the returned error code.
-   * @return void* Pointer to the newly allocated memory
-   */
-  _CCCL_NODISCARD void*
-  allocate_async(const size_t __bytes, const size_t __alignment, const ::cuda::stream_ref __stream) const
-  {
-    // We need to ensure that the provided alignment matches the minimal provided alignment
-    if (!__is_valid_alignment(__alignment))
-    {
-      _CUDA_VSTD_NOVERSION::__throw_bad_alloc();
-    }
-
-    return allocate_async(__bytes, __stream);
-  }
-
-  /**
-   * @brief Allocate device memory of size at least \p __bytes.
-   * @param __bytes The size in bytes of the allocation.
-   * @param __stream Stream on which to perform allocation.
-   * @throws cuda::std::bad_alloc in case of invalid alignment or cuda::cuda_error of the returned error code.
-   * @return void* Pointer to the newly allocated memory
-   */
-  _CCCL_NODISCARD void* allocate_async(const size_t __bytes, const ::cuda::stream_ref __stream) const
-  {
-    void* __ptr{nullptr};
-    _CCCL_TRY_CUDA_API(
-      ::cudaMallocAsync,
-      "cuda_memory_pool::allocate_async failed to allocate with cudaMallocAsync",
-      &__ptr,
-      __bytes,
-      __stream.get());
-    return __ptr;
-  }
-
-  /**
-   * @brief Deallocate memory pointed to by \p __ptr.
-   * @param __ptr Pointer to be deallocated. Must have been allocated through a call to `allocate_async`
-   * @param __bytes The number of bytes that was passed to the `allocate_async` call that returned \p __ptr.
-   * @param __alignment The alignment that was passed to the `allocate_async` call that returned \p __ptr.
-   * @param __stream Stream that was passed to the `allocate_async` call that returned \p __ptr.
-   */
-  void deallocate_async(void* __ptr, const size_t, const size_t __alignment, const ::cuda::stream_ref __stream) const
-  {
-    // We need to ensure that the provided alignment matches the minimal provided alignment
-    _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to cuda_memory_pool::deallocate.");
-    _CCCL_ASSERT_CUDA_API(::cudaFreeAsync, "cuda_memory_pool::deallocate_async failed", __ptr, __stream.get());
-    (void) __alignment;
-  }
-
-  /**
-   * @brief Deallocate memory pointed to by \p __ptr.
-   * @param __ptr Pointer to be deallocated. Must have been allocated through a call to `allocate_async`
-   * @param __bytes The number of bytes that was passed to the `allocate_async` call that returned \p __ptr.
-   * @param __stream Stream that was passed to the `allocate_async` call that returned \p __ptr.
-   */
-  void deallocate_async(void* __ptr, size_t, const ::cuda::stream_ref __stream) const
-  {
-    _CCCL_ASSERT_CUDA_API(::cudaFreeAsync, "cuda_memory_pool::deallocate_async failed", __ptr, __stream.get());
   }
 
   /**
@@ -335,53 +227,37 @@ public:
 #    endif // _CCCL_STD_VER <= 2017
 
   /**
-   * @brief Equality comparison between a cuda_memory_pool and another resource
-   * @param __lhs The cuda_memory_pool
-   * @param __rhs The resource to compare to
-   * @return If the underlying types are equality comparable, returns the result of equality comparison of both
-   * resources. Otherwise, returns false.
+   * @brief Equality comparison with a cudaMemPool_t
+   * @param __rhs A cudaMemPool_t
+   * @return true if the stored cudaMemPool_t is equal to \p __rhs
    */
-  template <class _Resource>
-  _CCCL_NODISCARD_FRIEND auto operator==(cuda_memory_pool const& __lhs, _Resource const& __rhs) noexcept
-    _LIBCUDACXX_TRAILING_REQUIRES(bool)(__different_resource<cuda_memory_pool, _Resource>)
+  _CCCL_NODISCARD_FRIEND constexpr bool operator==(cuda_memory_pool const& __lhs, ::cudaMemPool_t __rhs) noexcept
   {
-    return resource_ref<>{const_cast<cuda_memory_pool&>(__lhs)} == resource_ref<>{const_cast<_Resource&>(__rhs)};
+    return __lhs.__pool_handle_ == __rhs;
   }
-
 #    if _CCCL_STD_VER <= 2017
   /**
-   * @copydoc cuda_memory_pool::operator==<_Resource>(cuda_memory_resource const&, _Resource const&)
+   * @copydoc cuda_memory_pool::operator==(cuda_memory_pool const&, ::cudaMemPool_t)
    */
-  template <class _Resource>
-  _CCCL_NODISCARD_FRIEND auto operator==(_Resource const& __rhs, cuda_memory_pool const& __lhs) noexcept
-    _LIBCUDACXX_TRAILING_REQUIRES(bool)(__different_resource<cuda_memory_pool, _Resource>)
+  _CCCL_NODISCARD_FRIEND constexpr bool operator==(::cudaMemPool_t __lhs, cuda_memory_pool const& __rhs) noexcept
   {
-    return resource_ref<>{const_cast<cuda_memory_pool&>(__lhs)} == resource_ref<>{const_cast<_Resource&>(__rhs)};
+    return __rhs.__pool_handle_ == __lhs;
   }
   /**
-   * @copydoc cuda_memory_pool::operator==<_Resource>(cuda_memory_resource const&, _Resource const&)
+   * @copydoc cuda_memory_pool::operator==(cuda_memory_pool const&, ::cudaMemPool_t)
    */
-  template <class _Resource>
-  _CCCL_NODISCARD_FRIEND auto operator!=(cuda_memory_pool const& __lhs, _Resource const& __rhs) noexcept
-    _LIBCUDACXX_TRAILING_REQUIRES(bool)(__different_resource<cuda_memory_pool, _Resource>)
+  _CCCL_NODISCARD_FRIEND constexpr bool operator!=(cuda_memory_pool const& __lhs, ::cudaMemPool_t __rhs) noexcept
   {
-    return resource_ref<>{const_cast<cuda_memory_pool&>(__lhs)} != resource_ref<>{const_cast<_Resource&>(__rhs)};
+    return __lhs.__pool_handle_ != __rhs;
   }
   /**
-   * @copydoc cuda_memory_pool::operator==<_Resource>(cuda_memory_resource const&, _Resource const&)
+   * @copydoc cuda_memory_pool::operator==(cuda_memory_pool const&, ::cudaMemPool_t)
    */
-  template <class _Resource>
-  _CCCL_NODISCARD_FRIEND auto operator!=(_Resource const& __rhs, cuda_memory_pool const& __lhs) noexcept
-    _LIBCUDACXX_TRAILING_REQUIRES(bool)(__different_resource<cuda_memory_pool, _Resource>)
+  _CCCL_NODISCARD_FRIEND constexpr bool operator!=(::cudaMemPool_t __lhs, cuda_memory_pool const& __rhs) noexcept
   {
-    return resource_ref<>{const_cast<cuda_memory_pool&>(__lhs)} != resource_ref<>{const_cast<_Resource&>(__rhs)};
+    return __rhs.__pool_handle_ != __lhs;
   }
 #    endif // _CCCL_STD_VER <= 2017
-
-  /**
-   * @brief Enables the `device_accessible` property
-   */
-  friend constexpr void get_property(cuda_memory_pool const&, device_accessible) noexcept {}
 
   /**
    * @brief Returns the underlying handle to the CUDA memory pool
@@ -391,7 +267,6 @@ public:
     return __pool_handle_;
   }
 };
-static_assert(resource_with<cuda_memory_pool, device_accessible>, "");
 
 _LIBCUDACXX_END_NAMESPACE_CUDA_MR
 
