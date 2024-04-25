@@ -42,6 +42,39 @@
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 
 /**
+ * @brief  Checks whether the current device supports cudaMallocAsync
+ * @param __device_id The device id of the current device
+ * @throws cuda_error if cudaDeviceGetAttribute failed
+ * @returns true if cudaDevAttrMemoryPoolsSupported is not zero
+ */
+_CCCL_NODISCARD inline bool __device_supports_pools(const int __device_id)
+{
+  int __pool_is_supported = 0;
+  _CCCL_TRY_CUDA_API(
+    ::cudaDeviceGetAttribute,
+    "Failed to call cudaDeviceGetAttribute",
+    &__pool_is_supported,
+    ::cudaDevAttrMemoryPoolsSupported,
+    __device_id);
+  return __pool_is_supported != 0;
+}
+
+/**
+ * @brief  Returns the default cudaMemPool_t from the current device
+ * @param __device_id The device id of the current device
+ * @throws cuda_error if retrieving the default cudaMemPool_t fails
+ * @returns The default memory pool of the current device
+ */
+_CCCL_NODISCARD inline cudaMemPool_t __get_default_mem_pool(const int __device_id)
+{
+  _LIBCUDACXX_ASSERT(_CUDA_VMR::__device_supports_pools(__device_id), "cudaMallocAsync not supported");
+
+  ::cudaMemPool_t __pool;
+  _CCCL_TRY_CUDA_API(::cudaDeviceGetDefaultMemPool, "Failed to call cudaDeviceGetDefaultMemPool", &__pool, __device_id);
+  return __pool;
+}
+
+/**
  * @brief Internal redefinition of cudaMemAllocationHandleType
  *
  * @note We need to define our own enum here because the earliest CUDA runtime version that supports asynchronous
