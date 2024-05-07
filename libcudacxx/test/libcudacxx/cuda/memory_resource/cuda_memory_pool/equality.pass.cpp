@@ -39,9 +39,9 @@ void test()
                        current_device);
   }
 
-  cuda::mr::cuda_memory_pool first{};
+  cuda::mr::cuda_memory_pool first{current_device};
   { // comparison against a plain cuda_memory_pool
-    cuda::mr::cuda_memory_pool second{};
+    cuda::mr::cuda_memory_pool second{current_device};
     assert(first == first);
     assert(first != second);
   }

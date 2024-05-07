@@ -137,7 +137,7 @@ void test()
 
   {
     const size_t initial_pool_size = 42;
-    cuda::mr::cuda_memory_pool pool{initial_pool_size};
+    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size};
     async_resource from_initial_pool_size{pool};
 
     ::cudaMemPool_t pool_handle = from_initial_pool_size.pool_handle();
@@ -156,7 +156,7 @@ void test()
   {
     const size_t initial_pool_size = 42;
     const size_t release_threshold = 20;
-    cuda::mr::cuda_memory_pool pool{initial_pool_size, release_threshold};
+    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size, release_threshold};
     async_resource with_threshold{pool};
 
     ::cudaMemPool_t pool_handle = with_threshold.pool_handle();
@@ -179,7 +179,7 @@ void test()
     const size_t release_threshold = 20;
     const cuda::mr::cudaMemAllocationHandleType allocation_handle{
       cuda::mr::cudaMemAllocationHandleType::cudaMemHandleTypePosixFileDescriptor};
-    cuda::mr::cuda_memory_pool pool{initial_pool_size, release_threshold, allocation_handle};
+    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size, release_threshold, allocation_handle};
     async_resource with_allocation_handle{pool};
 
     ::cudaMemPool_t pool_handle = with_allocation_handle.pool_handle();

@@ -20,7 +20,7 @@
 using pool = cuda::mr::cuda_memory_pool;
 static_assert(!cuda::std::is_trivial<pool>::value, "");
 static_assert(!cuda::std::is_trivially_default_constructible<pool>::value, "");
-static_assert(cuda::std::is_default_constructible<pool>::value, "");
+static_assert(!cuda::std::is_default_constructible<pool>::value, "");
 static_assert(!cuda::std::is_copy_constructible<pool>::value, "");
 static_assert(!cuda::std::is_move_constructible<pool>::value, "");
 static_assert(!cuda::std::is_copy_assignable<pool>::value, "");

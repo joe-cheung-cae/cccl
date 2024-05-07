@@ -79,7 +79,6 @@ public:
 
   /**
    * @brief  Constructs the cuda_async_memory_resource from a cuda_memory_pool by calling pool_handle()
-   * @throws cuda_error if retrieving the default cudaMemPool_t fails
    */
   cuda_async_memory_resource(cuda_memory_pool& __cuda_pool) noexcept
       : __pool_(__cuda_pool.pool_handle())
@@ -170,7 +169,8 @@ public:
    * @param __ptr Pointer to be deallocated. Must have been allocated through a call to `allocate_async`
    * @param __bytes The number of bytes that was passed to the `allocate_async` call that returned \p __ptr.
    * @param __alignment The alignment that was passed to the `allocate_async` call that returned \p __ptr.
-   * @param __stream Stream that was passed to the `allocate_async` call that returned \p __ptr.
+   * @param __stream A stream that has a stream ordering relationship with the stream used in the `allocate_async` call
+   * that returned \p __ptr. See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
    */
   void deallocate_async(void* __ptr, const size_t __bytes, const size_t __alignment, const ::cuda::stream_ref __stream)
   {
@@ -185,7 +185,8 @@ public:
    * @brief Deallocate memory pointed to by \p __ptr.
    * @param __ptr Pointer to be deallocated. Must have been allocated through a call to `allocate_async`
    * @param __bytes The number of bytes that was passed to the `allocate_async` call that returned \p __ptr.
-   * @param __stream Stream that was passed to the `allocate_async` call that returned \p __ptr.
+   * @param __stream A stream that has a stream ordering relationship with the stream used in the `allocate_async` call
+   * that returned \p __ptr. See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
    */
   void deallocate_async(void* __ptr, size_t, const ::cuda::stream_ref __stream)
   {

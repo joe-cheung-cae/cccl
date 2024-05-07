@@ -141,11 +141,11 @@ private:
    * @returns The created cuda memory pool
    */
   _CCCL_NODISCARD static cudaMemPool_t __create_cuda_mempool(
+    const int __device_id,
     size_t __initial_pool_size,
     size_t __release_threshold,
     const cudaMemAllocationHandleType __allocation_handle_type) noexcept
   {
-    const int __device_id = _CUDA_VMR::__get_current_cuda_device();
     _LIBCUDACXX_ASSERT(_CUDA_VMR::__device_supports_pools(__device_id), "cudaMallocAsync not supported");
     _LIBCUDACXX_ASSERT(__cuda_supports_export_handle_type(__device_id, __allocation_handle_type),
                        "Requested IPC memory handle type not supported");
@@ -210,16 +210,20 @@ public:
    *
    * @throws ::cuda::cuda_error if the CUDA version does not support `cudaMallocAsync`
    *
-   * @param initial_pool_size Optional initial size in bytes of the pool. If no value is provided,
+   * @param __device_id The device id of the device the stream pool is constructed on.
+   * @param __initial_pool_size Optional initial size in bytes of the pool. If no value is provided,
    * initial pool size is half of the available GPU memory.
-   * @param release_threshold Optional release threshold size in bytes of the pool. If no value is
+   * @param __release_threshold Optional release threshold size in bytes of the pool. If no value is
    * provided, the release threshold is set to the total amount of memory on the current device.
+   * @param __allocation_handle_type Optional allocation handle for export.
    */
-  cuda_memory_pool(
-    const size_t initial_pool_size                             = 0,
-    const size_t release_threshold                             = 0,
+  explicit cuda_memory_pool(
+    const int __device_id,
+    const size_t __initial_pool_size                           = 0,
+    const size_t __release_threshold                           = 0,
     const cudaMemAllocationHandleType __allocation_handle_type = cudaMemAllocationHandleType::cudaMemHandleTypeNone)
-      : __pool_handle_(__create_cuda_mempool(initial_pool_size, release_threshold, __allocation_handle_type))
+      : __pool_handle_(
+        __create_cuda_mempool(__device_id, __initial_pool_size, __release_threshold, __allocation_handle_type))
   {}
 
   /**

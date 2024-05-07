@@ -78,13 +78,13 @@ void test()
   }
 
   {
-    cuda::mr::cuda_memory_pool default_constructed{};
-    assert(default_constructed.pool_handle() != current_default_pool);
+    cuda::mr::cuda_memory_pool from_device{current_device};
+    assert(from_device.pool_handle() != current_default_pool);
   }
 
   {
     const size_t initial_pool_size = 42;
-    cuda::mr::cuda_memory_pool from_initial_pool_size{initial_pool_size};
+    cuda::mr::cuda_memory_pool from_initial_pool_size{current_device, initial_pool_size};
 
     ::cudaMemPool_t pool_handle = from_initial_pool_size.pool_handle();
     assert(pool_handle != current_default_pool);
@@ -102,7 +102,7 @@ void test()
   {
     const size_t initial_pool_size = 42;
     const size_t release_threshold = 20;
-    cuda::mr::cuda_memory_pool with_threshold{initial_pool_size, release_threshold};
+    cuda::mr::cuda_memory_pool with_threshold{current_device, initial_pool_size, release_threshold};
 
     ::cudaMemPool_t pool_handle = with_threshold.pool_handle();
     assert(pool_handle != current_default_pool);
@@ -124,7 +124,8 @@ void test()
     const size_t release_threshold = 20;
     const cuda::mr::cudaMemAllocationHandleType allocation_handle{
       cuda::mr::cudaMemAllocationHandleType::cudaMemHandleTypePosixFileDescriptor};
-    cuda::mr::cuda_memory_pool with_allocation_handle{initial_pool_size, release_threshold, allocation_handle};
+    cuda::mr::cuda_memory_pool with_allocation_handle{
+      current_device, initial_pool_size, release_threshold, allocation_handle};
 
     ::cudaMemPool_t pool_handle = with_allocation_handle.pool_handle();
     assert(pool_handle != current_default_pool);
