@@ -41,6 +41,8 @@
  email: m-mat @ math.sci.hiroshima-u.ac.jp (remove space)
  */
 
+#pragma once
+
 #include <stdio.h>
 
 namespace mersenne
@@ -117,7 +119,7 @@ void init_by_array(unsigned int init_key[], int key_length)
 }
 
 /* generates a random number on [0,0xffffffff]-interval */
-unsigned int genrand_int32(void)
+unsigned int genrand_int32()
 {
   unsigned int y;
   static unsigned int mag01[2] = {0x0, MATRIX_A};
