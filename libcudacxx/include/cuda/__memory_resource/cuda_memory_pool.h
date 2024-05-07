@@ -91,6 +91,19 @@ enum class cudaMemAllocationHandleType
 };
 
 /**
+ * @brief `cuda_memory_pool_properties` is a wrapper around a properties passed to `cuda_memory_pool` to create a cuda
+ * memory pool
+ *
+ * See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
+ */
+struct cuda_memory_pool_properties
+{
+  size_t initial_pool_size                           = 0;
+  size_t release_threshold                           = 0;
+  cudaMemAllocationHandleType allocation_handle_type = cudaMemAllocationHandleType::cudaMemHandleTypeNone;
+};
+
+/**
  * @brief `cuda_memory_pool` is a simple wrapper around a `cudaMemPool_t`
  *
  * See https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html
@@ -140,19 +153,16 @@ private:
    * @throws cuda_error if the creation of the cuda memory pool failed
    * @returns The created cuda memory pool
    */
-  _CCCL_NODISCARD static cudaMemPool_t __create_cuda_mempool(
-    const int __device_id,
-    size_t __initial_pool_size,
-    size_t __release_threshold,
-    const cudaMemAllocationHandleType __allocation_handle_type) noexcept
+  _CCCL_NODISCARD static cudaMemPool_t
+  __create_cuda_mempool(const int __device_id, cuda_memory_pool_properties __properties) noexcept
   {
     _LIBCUDACXX_ASSERT(_CUDA_VMR::__device_supports_pools(__device_id), "cudaMallocAsync not supported");
-    _LIBCUDACXX_ASSERT(__cuda_supports_export_handle_type(__device_id, __allocation_handle_type),
+    _LIBCUDACXX_ASSERT(__cuda_supports_export_handle_type(__device_id, __properties.allocation_handle_type),
                        "Requested IPC memory handle type not supported");
 
     ::cudaMemPoolProps __pool_properties{};
     __pool_properties.allocType     = ::cudaMemAllocationTypePinned;
-    __pool_properties.handleTypes   = ::cudaMemAllocationHandleType(__allocation_handle_type);
+    __pool_properties.handleTypes   = ::cudaMemAllocationHandleType(__properties.allocation_handle_type);
     __pool_properties.location.type = ::cudaMemLocationTypeDevice;
     __pool_properties.location.id   = __device_id;
     ::cudaMemPool_t __cuda_pool_handle{};
@@ -181,17 +191,17 @@ private:
       "Failed to call cudaMemPoolReuseAllowOpportunistic",
       __cuda_pool_handle,
       ::cudaMemPoolAttrReleaseThreshold,
-      &__release_threshold);
+      &__properties.release_threshold);
 
     // allocate the requested initial size to pprime the pool
-    if (__initial_pool_size != 0)
+    if (__properties.initial_pool_size != 0)
     {
       void* __ptr{nullptr};
       _CCCL_TRY_CUDA_API(
         ::cudaMallocAsync,
         "cuda_memory_pool failed allocate the initial pool size",
         &__ptr,
-        __initial_pool_size,
+        __properties.initial_pool_size,
         ::cudaStream_t{0});
 
       _CCCL_ASSERT_CUDA_API(
@@ -211,19 +221,10 @@ public:
    * @throws ::cuda::cuda_error if the CUDA version does not support `cudaMallocAsync`
    *
    * @param __device_id The device id of the device the stream pool is constructed on.
-   * @param __initial_pool_size Optional initial size in bytes of the pool. If no value is provided,
-   * initial pool size is half of the available GPU memory.
-   * @param __release_threshold Optional release threshold size in bytes of the pool. If no value is
-   * provided, the release threshold is set to the total amount of memory on the current device.
-   * @param __allocation_handle_type Optional allocation handle for export.
+   * @param __pool_properties Optional, additional properties of the pool to be created
    */
-  explicit cuda_memory_pool(
-    const int __device_id,
-    const size_t __initial_pool_size                           = 0,
-    const size_t __release_threshold                           = 0,
-    const cudaMemAllocationHandleType __allocation_handle_type = cudaMemAllocationHandleType::cudaMemHandleTypeNone)
-      : __pool_handle_(
-        __create_cuda_mempool(__device_id, __initial_pool_size, __release_threshold, __allocation_handle_type))
+  explicit cuda_memory_pool(const int __device_id, cuda_memory_pool_properties __properties = {})
+      : __pool_handle_(__create_cuda_mempool(__device_id, __properties))
   {}
 
   /**

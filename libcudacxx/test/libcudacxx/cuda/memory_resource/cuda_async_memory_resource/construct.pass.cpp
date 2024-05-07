@@ -136,8 +136,10 @@ void test()
   }
 
   {
-    const size_t initial_pool_size = 42;
-    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size};
+    cuda::mr::cuda_memory_pool_properties props = {
+      42,
+    };
+    cuda::mr::cuda_memory_pool pool{current_device, props};
     async_resource from_initial_pool_size{pool};
 
     ::cudaMemPool_t pool_handle = from_initial_pool_size.pool_handle();
@@ -154,16 +156,18 @@ void test()
   }
 
   {
-    const size_t initial_pool_size = 42;
-    const size_t release_threshold = 20;
-    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size, release_threshold};
+    cuda::mr::cuda_memory_pool_properties props = {
+      42,
+      20,
+    };
+    cuda::mr::cuda_memory_pool pool{current_device, props};
     async_resource with_threshold{pool};
 
     ::cudaMemPool_t pool_handle = with_threshold.pool_handle();
     assert(pool_handle != current_default_pool);
 
     // Ensure we use the right release threshold
-    assert(ensure_release_threshold(pool_handle, release_threshold));
+    assert(ensure_release_threshold(pool_handle, props.release_threshold));
 
     // Ensure that we disable reuse with unsupported drivers
     assert(ensure_disable_reuse(pool_handle, driver_version));
@@ -175,24 +179,25 @@ void test()
   // Allocation handles are only supported after 11.2
 #if !defined(TEST_COMPILER_CUDACC_BELOW_11_3)
   {
-    const size_t initial_pool_size = 42;
-    const size_t release_threshold = 20;
-    const cuda::mr::cudaMemAllocationHandleType allocation_handle{
-      cuda::mr::cudaMemAllocationHandleType::cudaMemHandleTypePosixFileDescriptor};
-    cuda::mr::cuda_memory_pool pool{current_device, initial_pool_size, release_threshold, allocation_handle};
+    cuda::mr::cuda_memory_pool_properties props = {
+      42,
+      20,
+      cuda::mr::cudaMemAllocationHandleType::cudaMemHandleTypePosixFileDescriptor,
+    };
+    cuda::mr::cuda_memory_pool pool{current_device, props};
     async_resource with_allocation_handle{pool};
 
     ::cudaMemPool_t pool_handle = with_allocation_handle.pool_handle();
     assert(pool_handle != current_default_pool);
 
     // Ensure we use the right release threshold
-    assert(ensure_release_threshold(pool_handle, release_threshold));
+    assert(ensure_release_threshold(pool_handle, props.release_threshold));
 
     // Ensure that we disable reuse with unsupported drivers
     assert(ensure_disable_reuse(pool_handle, driver_version));
 
     // Ensure that we disable export
-    assert(ensure_export_handle(pool_handle, static_cast<cudaMemAllocationHandleType>(allocation_handle)));
+    assert(ensure_export_handle(pool_handle, static_cast<cudaMemAllocationHandleType>(props.allocation_handle_type)));
   }
 #endif // !TEST_COMPILER_CUDACC_BELOW_11_3
 }
