@@ -36,7 +36,7 @@ namespace detail
 {
 
 template <typename T>
-struct is_void_like : thrust::detail::or_<::cuda::std::is_void<T>, ::cuda::std::is_same<T, thrust::detail::any_assign>>
+struct is_void_like : ::cuda::std::_Or<::cuda::std::is_void<T>, ::cuda::std::is_same<T, thrust::detail::any_assign>>
 {}; // end is_void_like
 
 template <typename T>
