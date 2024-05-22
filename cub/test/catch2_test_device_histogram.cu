@@ -27,10 +27,7 @@
  ******************************************************************************/
 
 #include <cub/device/device_histogram.cuh>
-#include <cub/iterator/constant_input_iterator.cuh>
 #include <cub/iterator/counting_input_iterator.cuh>
-
-#include <thrust/iterator/counting_iterator.h>
 
 #include <cuda/std/__cccl/dialect.h>
 #include <cuda/std/__cccl/execution_space.h>
@@ -39,12 +36,10 @@
 
 #include <algorithm>
 #include <limits>
-#include <typeinfo>
 
 #include "c2h/vector.cuh"
 #include "catch2_test_helper.h"
-// #include "catch2_test_launch_helper.h"
-
+#include "catch2_test_launch_helper.h"
 #include "test_util.h"
 
 #define TEST_HALF_T !_NVHPC_CUDA
@@ -53,45 +48,27 @@
 #  include <cuda_fp16.h>
 #endif
 
-// %PA_RAM% TEST_LAUNCH lid 0:1:2 TODO(bgruber): enable
+// %PARAM% TEST_LAUNCH lid 0:1:2
 
-// struct FakeHistogram
-// {
-//   template <typename Channels, ...>
-//   static MultiHistogramEven(...);
-// };
+DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::HistogramEven, histogram_even);
+DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::HistogramRange, histogram_range);
 
-// struct custom_x2_0_invocable
-// {
-//   template <class T>
-//   CUB_RUNTIME_FUNCTION cudaError_t operator()(
-//     std::uint8_t* d_temp_storage,
-//     std::size_t& temp_storage_bytes,
-//     const T* d_in,
-//     T* d_out,
-//     int num_items,
-//     cudaStream_t stream = 0)
-//   {
-//     return cub_api_example_t::x2_0(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
-//   }
-// };
-// and use launch()
+DECLARE_TMPL_LAUNCH_WRAPPER(cub::DeviceHistogram::MultiHistogramEven,
+                            multi_histogram_even,
+                            ESCAPE_LIST(int Channels, int ActiveChannels),
+                            ESCAPE_LIST(Channels, ActiveChannels));
 
-// TODO(bgruber): cannot enable because DECLARE_LAUNCH_WRAPPER does not support NTTPs
-// DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::HistogramEven, histogram_even);
-// DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::MultiHistogramEven, multi_histogram_even);
-// DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::HistogramRange, histogram_range);
-// DECLARE_LAUNCH_WRAPPER(cub::DeviceHistogram::MultiHistogramRange, multi_histogram_range);
+DECLARE_TMPL_LAUNCH_WRAPPER(cub::DeviceHistogram::MultiHistogramRange,
+                            multi_histogram_range,
+                            ESCAPE_LIST(int Channels, int ActiveChannels),
+                            ESCAPE_LIST(Channels, ActiveChannels));
 
-// TODO: only template parametes are PascalCase, everything else is snake_case!!
-
-// using namespace cub;
 using ::cuda::std::array;
 
-template <typename It>
-auto castIfHalfPointer(It it) -> It
+template <typename T>
+auto castIfHalfPointer(T* p) -> T*
 {
-  return it;
+  return p;
 }
 
 #if TEST_HALF_T
@@ -152,9 +129,10 @@ void call_even(
   OffsetT num_rows,
   OffsetT row_stride_bytes)
 {
+  // TODO(bgruber): use launch wrapper
   _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
   {
-    const auto error = cub::DeviceHistogram::HistogramEven(
+    const auto error = histogram_even(
       d_temp_storage,
       temp_storage_bytes,
       castIfHalfPointer(d_samples),
@@ -195,6 +173,7 @@ void call_range(
   OffsetT num_rows,
   OffsetT row_stride_bytes)
 {
+  // TODO(bgruber): use launch wrapper
   _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
   {
     const auto error = cub::DeviceHistogram::HistogramRange(
@@ -494,27 +473,10 @@ auto generate_levels_to_test(int max_level_count) -> array<int, ActiveChannels>
 struct bit_and_anything
 {
   template <typename T>
-  _CCCL_HOST_DEVICE auto operator()(const T& a, const T& b) const
+  _CCCL_HOST_DEVICE auto operator()(const T& a, const T& b) const -> T
   {
-    return a & b;
-  }
-
-#ifdef TEST_HALF_T
-  _CCCL_HOST_DEVICE auto operator()(half_t a, half_t b) const
-  {
-    return c2h::bit_cast<half_t>(
-      static_cast<std::uint16_t>(c2h::bit_cast<std::uint16_t>(a) & c2h::bit_cast<std::uint16_t>(b)));
-  }
-#endif
-
-  _CCCL_HOST_DEVICE auto operator()(float a, float b) const
-  {
-    return c2h::bit_cast<float>(c2h::bit_cast<std::uint32_t>(a) & c2h::bit_cast<std::uint32_t>(b));
-  }
-
-  _CCCL_HOST_DEVICE auto operator()(double a, double b) const
-  {
-    return c2h::bit_cast<double>(c2h::bit_cast<std::uint64_t>(a) & c2h::bit_cast<std::uint64_t>(b));
+    using U = typename cub::Traits<T>::UnsignedBits;
+    return c2h::bit_cast<T>(static_cast<U>(c2h::bit_cast<U>(a) & c2h::bit_cast<U>(b)));
   }
 };
 
@@ -583,7 +545,7 @@ CUB_TEST("DeviceHistogram::Histogram* basic use", "[histogram_even][histogram_ra
   test_even_and_range<sample_t, 4, 3, int>(level_t{256}, 256 + 1, 1920, 1080);
 }
 
-// This test also covers int32 and int64 arithmetic for bin computation
+// This test covers int32 and int64 arithmetic for bin computation
 CUB_TEST("DeviceHistogram::Histogram* levels cover type range", "[histogram_even][histogram_range][device]", types)
 {
   using sample_t = c2h::get<0, TestType>;
@@ -655,45 +617,20 @@ CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][dev
     d_histogram[c].resize(num_levels[c] - 1);
   }
 
-  size_t temp_storage_bytes = 0;
-  {
-    const auto error = cub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-      nullptr,
-      temp_storage_bytes,
-      sample_iterator,
-      toPtrArray(d_histogram).data(),
-      num_levels.data(),
-      lower_level.data(),
-      upper_level.data(),
-      width,
-      height,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
-  }
-  {
-    auto d_temp_storage = c2h::device_vector<char>(temp_storage_bytes);
-    const auto error    = cub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-      thrust::raw_pointer_cast(d_temp_storage.data()),
-      temp_storage_bytes,
-      sample_iterator,
-      toPtrArray(d_histogram).data(),
-      num_levels.data(),
-      lower_level.data(),
-      upper_level.data(),
-      width,
-      height,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
-  }
+  multi_histogram_even<Channels, ActiveChannels>(
+    sample_iterator,
+    toPtrArray(d_histogram).data(),
+    num_levels.data(),
+    lower_level.data(),
+    upper_level.data(),
+    width,
+    height,
+    row_stride_bytes);
 
-  auto to_std_vector = [](const c2h::device_vector<int>& d_vec) -> std::vector<int> {
-    c2h::host_vector<int> h_vec(d_vec);
-    return std::vector<int>(h_vec.begin(), h_vec.end());
-  };
-
-  CHECK(to_std_vector(d_histogram[0]) == std::vector<int>(10, (width * height) / 10));
-  CHECK(to_std_vector(d_histogram[1]) == std::vector<int>{0, 3});
-  CHECK(to_std_vector(d_histogram[2]) == std::vector<int>{width * height});
+  // TODO(bgruber): move detail::to_vec into namespace c2h?
+  CHECK(detail::to_vec(d_histogram[0]) == std::vector<int>(10, (width * height) / 10));
+  CHECK(detail::to_vec(d_histogram[1]) == std::vector<int>{0, 3});
+  CHECK(detail::to_vec(d_histogram[2]) == std::vector<int>{width * height});
 }
 
 // Regression: https://github.com/NVIDIA/cub/issues/479
@@ -726,30 +663,12 @@ CUB_TEST("DeviceHistogram::HistogramRange levels/samples aliasing", "[histogram_
 
   auto d_histogram = c2h::device_vector<int>(num_levels - 1);
   auto d_samples   = c2h::device_vector<int>(std::begin(h_samples), std::end(h_samples));
-
-  // Alias levels with samples (fancy way to `d_histogram[bin]++`).
-  int* d_levels = thrust::raw_pointer_cast(d_samples.data());
-
-  std::size_t temp_storage_bytes = 0;
-  const auto error               = cub::DeviceHistogram::HistogramRange(
-    nullptr,
-    temp_storage_bytes,
+  histogram_range(
     thrust::raw_pointer_cast(d_samples.data()),
     thrust::raw_pointer_cast(d_histogram.data()),
     num_levels,
-    d_levels,
+    thrust::raw_pointer_cast(d_samples.data()), // Alias levels with samples (fancy way to `d_histogram[bin]++`).
     static_cast<int>(d_samples.size()));
-  CHECK(error == cudaSuccess);
-  auto d_temp_storage = c2h::device_vector<char>(temp_storage_bytes);
-
-  CubDebugExit(cub::DeviceHistogram::HistogramRange(
-    thrust::raw_pointer_cast(d_temp_storage.data()),
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_samples.data()),
-    thrust::raw_pointer_cast(d_histogram.data()),
-    num_levels,
-    d_levels,
-    static_cast<int>(d_samples.size())));
 
   auto h_histogram = c2h::host_vector<int>(d_histogram);
   for (int bin = 0; bin < num_levels - 1; bin++)
@@ -759,6 +678,8 @@ CUB_TEST("DeviceHistogram::HistogramRange levels/samples aliasing", "[histogram_
   }
 }
 
+// TODO(bgruber): this test checks error codes, is it fine if we check this only for host-side invocation?
+#if TEST_LAUNCH == 0
 // Our bin computation for HistogramEven is guaranteed only for when (max_level - min_level) * num_bins does not
 // overflow using uint64_t arithmetic. In case of overflow, we expect cudaErrorInvalidValue to be returned.
 CUB_TEST_LIST("DeviceHistogram::HistogramEven bin computation does not overflow",
@@ -773,7 +694,7 @@ CUB_TEST_LIST("DeviceHistogram::HistogramEven bin computation does not overflow"
   constexpr sample_t lower_level = 0;
   constexpr sample_t upper_level = ::cuda::std::numeric_limits<sample_t>::max();
   constexpr auto num_samples     = 1000;
-  auto d_samples                 = thrust::counting_iterator<sample_t>{0UL};
+  auto d_samples                 = cub::CountingInputIterator<sample_t>{0UL};
   auto d_histo_out               = c2h::device_vector<counter_t>(1024);
   const auto num_bins            = GENERATE(1, 2);
 
@@ -810,46 +731,24 @@ CUB_TEST_LIST("DeviceHistogram::HistogramEven bin computation does not overflow"
   // Ensure we do not return an error on querying temporary storage requirements
   CHECK(error2 == (num_bins == 1 || sizeof(sample_t) <= 4UL ? cudaSuccess : cudaErrorInvalidValue));
 }
+#endif // TEST_LAUNCH == 0
 
 // Regression test for https://github.com/NVIDIA/cub/issues/489: integer rounding errors lead to incorrect bin detection
 CUB_TEST("DeviceHistogram::HistogramEven bin calculation regression", "[histogram_even][device]")
 {
-  constexpr int num_levels = 8;
-  constexpr int num_bins   = num_levels - 1;
+  constexpr int num_levels   = 8;
+  const auto h_histogram_ref = c2h::host_vector<int>{1, 5, 0, 2, 1, 0, 0};
+  const auto d_samples       = c2h::device_vector<int>{2, 6, 7, 2, 3, 0, 2, 2, 6, 999};
+  constexpr int lower_level  = 0;
+  constexpr int upper_level  = 12;
 
-  constexpr int h_histogram_ref[num_bins]{1, 5, 0, 2, 1, 0, 0};
-  constexpr int h_samples[]{2, 6, 7, 2, 3, 0, 2, 2, 6, 999};
-  constexpr int lower_level = 0;
-  constexpr int upper_level = 12;
-
-  auto d_histogram = c2h::device_vector<int>(num_levels - 1);
-  auto d_samples   = c2h::device_vector<int>(std::begin(h_samples), std::end(h_samples));
-
-  std::size_t temp_storage_bytes = 0;
-  CubDebugExit(cub::DeviceHistogram::HistogramEven(
-    nullptr,
-    temp_storage_bytes,
+  auto d_histogram = c2h::device_vector<int>(h_histogram_ref.size());
+  histogram_even(
     thrust::raw_pointer_cast(d_samples.data()),
     thrust::raw_pointer_cast(d_histogram.data()),
     num_levels,
     lower_level,
     upper_level,
-    static_cast<int>(d_samples.size())));
-  auto d_temp_storage = c2h::device_vector<char>(temp_storage_bytes);
-
-  CubDebugExit(cub::DeviceHistogram::HistogramEven(
-    thrust::raw_pointer_cast(d_temp_storage.data()),
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_samples.data()),
-    thrust::raw_pointer_cast(d_histogram.data()),
-    num_levels,
-    lower_level,
-    upper_level,
-    static_cast<int>(d_samples.size())));
-
-  auto h_histogram = c2h::host_vector<int>(d_histogram);
-  for (int bin = 0; bin < num_bins; ++bin)
-  {
-    CHECK(h_histogram_ref[bin] == h_histogram[bin]);
-  }
+    static_cast<int>(d_samples.size()));
+  CHECK(h_histogram_ref == d_histogram);
 }
