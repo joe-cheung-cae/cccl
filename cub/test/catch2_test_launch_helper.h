@@ -179,17 +179,15 @@ void device_side_api_launch(ActionT action, Args... args)
 template <class ActionT, class... Args>
 void host_side_api_launch(ActionT action, Args... args)
 {
-  std::uint8_t* d_temp_storage = nullptr;
   std::size_t temp_storage_bytes{};
-  cudaError_t error = action(d_temp_storage, temp_storage_bytes, args...);
+  cudaError_t error = action(nullptr, temp_storage_bytes, args...);
   REQUIRE(cudaSuccess == cudaPeekAtLastError());
   REQUIRE(cudaSuccess == cudaDeviceSynchronize());
   REQUIRE(cudaSuccess == error);
 
   c2h::device_vector<std::uint8_t> temp_storage(temp_storage_bytes);
-  d_temp_storage = thrust::raw_pointer_cast(temp_storage.data());
 
-  error = action(d_temp_storage, temp_storage_bytes, args...);
+  error = action(thrust::raw_pointer_cast(temp_storage.data()), temp_storage_bytes, args...);
   REQUIRE(cudaSuccess == cudaPeekAtLastError());
   REQUIRE(cudaSuccess == cudaDeviceSynchronize());
   REQUIRE(cudaSuccess == error);
