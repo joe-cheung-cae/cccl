@@ -66,25 +66,25 @@ DECLARE_TMPL_LAUNCH_WRAPPER(cub::DeviceHistogram::MultiHistogramRange,
 using ::cuda::std::array;
 
 template <typename T>
-auto castIfHalfPointer(T* p) -> T*
+auto cast_if_half_pointer(T* p) -> T*
 {
   return p;
 }
 
 #if TEST_HALF_T
-auto castIfHalfPointer(half_t* p) -> __half*
+auto cast_if_half_pointer(half_t* p) -> __half*
 {
   return reinterpret_cast<__half*>(p);
 }
 
-auto castIfHalfPointer(half_t* const* p) -> __half* const*
+auto cast_if_half_pointer(half_t* const* p) -> __half* const*
 {
   return reinterpret_cast<__half* const*>(p);
 }
 #endif
 
 template <typename T, std::size_t N>
-auto toPtrArray(array<c2h::device_vector<T>, N>& in) -> array<T*, N>
+auto to_ptr_array(array<c2h::device_vector<T>, N>& in) -> array<T*, N>
 {
   array<T*, N> r;
   for (std::size_t i = 0; i < N; i++)
@@ -95,7 +95,7 @@ auto toPtrArray(array<c2h::device_vector<T>, N>& in) -> array<T*, N>
 }
 
 template <typename T, std::size_t N>
-auto toPtrArray(const array<c2h::device_vector<T>, N>& in) -> array<const T*, N>
+auto to_ptr_array(const array<c2h::device_vector<T>, N>& in) -> array<const T*, N>
 {
   array<const T*, N> r;
   for (std::size_t i = 0; i < N; i++)
@@ -106,7 +106,7 @@ auto toPtrArray(const array<c2h::device_vector<T>, N>& in) -> array<const T*, N>
 }
 
 template <typename C, std::size_t N>
-auto toSizeArray(const array<C, N>& in) -> array<int, N>
+auto to_size_array(const array<C, N>& in) -> array<int, N>
 {
   array<int, N> r;
   for (std::size_t i = 0; i < N; i++)
@@ -116,62 +116,65 @@ auto toSizeArray(const array<C, N>& in) -> array<int, N>
   return r;
 }
 
-template <int ActiveChannels, int Channels, typename SampleIteratorT, typename CounterT, typename LevelT, typename OffsetT>
+template <typename OffsetT>
+struct ImageDesc
+{
+  OffsetT width;
+  OffsetT height;
+  OffsetT row_pitch; // in bytes
+};
+
+template <int Channels, std::size_t ActiveChannels, typename SampleT, typename CounterT, typename LevelT, typename OffsetT>
 void call_even(
   void* d_temp_storage,
   size_t& temp_storage_bytes,
-  SampleIteratorT d_samples,
+  const SampleT* d_samples,
   array<c2h::device_vector<CounterT>, ActiveChannels>& d_histogram,
   const array<int, ActiveChannels>& num_levels,
   const array<LevelT, ActiveChannels>& lower_level,
   const array<LevelT, ActiveChannels>& upper_level,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_bytes)
+  ImageDesc<OffsetT> image_desc)
 {
   // TODO(bgruber): use launch wrapper
   _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
   {
-    const auto error = histogram_even(
+    const auto error = cub::DeviceHistogram::HistogramEven(
       d_temp_storage,
       temp_storage_bytes,
-      castIfHalfPointer(d_samples),
-      toPtrArray(d_histogram)[0],
+      cast_if_half_pointer(d_samples),
+      to_ptr_array(d_histogram)[0],
       num_levels[0],
-      castIfHalfPointer(lower_level.data())[0],
-      castIfHalfPointer(upper_level.data())[0],
-      num_row_pixels,
-      num_rows,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
+      cast_if_half_pointer(lower_level.data())[0],
+      cast_if_half_pointer(upper_level.data())[0],
+      image_desc.width,
+      image_desc.height,
+      image_desc.row_pitch);
+    REQUIRE(error == cudaSuccess);
   }
   else
   {
     const auto error = cub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
       d_temp_storage,
       temp_storage_bytes,
-      castIfHalfPointer(d_samples),
-      toPtrArray(d_histogram).data(),
+      cast_if_half_pointer(d_samples),
+      to_ptr_array(d_histogram).data(),
       num_levels.data(),
-      castIfHalfPointer(lower_level.data()),
-      castIfHalfPointer(upper_level.data()),
-      num_row_pixels,
-      num_rows,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
+      cast_if_half_pointer(lower_level.data()),
+      cast_if_half_pointer(upper_level.data()),
+      image_desc.width,
+      image_desc.height,
+      image_desc.row_pitch);
+    REQUIRE(error == cudaSuccess);
   }
 }
 
-template <int ActiveChannels, int Channels, typename SampleIteratorT, typename CounterT, typename LevelT, typename OffsetT>
-void call_range(
-  void* d_temp_storage,
-  size_t& temp_storage_bytes,
-  SampleIteratorT d_samples,
-  array<c2h::device_vector<CounterT>, ActiveChannels>& d_histogram,
-  const array<c2h::device_vector<LevelT>, ActiveChannels>& d_levels,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_bytes)
+template <int Channels, std::size_t ActiveChannels, typename SampleT, typename CounterT, typename LevelT, typename OffsetT>
+void call_range(void* d_temp_storage,
+                size_t& temp_storage_bytes,
+                const SampleT* d_samples,
+                array<c2h::device_vector<CounterT>, ActiveChannels>& d_histogram,
+                const array<c2h::device_vector<LevelT>, ActiveChannels>& d_levels,
+                ImageDesc<OffsetT> image_desc)
 {
   // TODO(bgruber): use launch wrapper
   _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
@@ -179,234 +182,65 @@ void call_range(
     const auto error = cub::DeviceHistogram::HistogramRange(
       d_temp_storage,
       temp_storage_bytes,
-      castIfHalfPointer(d_samples),
-      toPtrArray(d_histogram)[0],
+      cast_if_half_pointer(d_samples),
+      to_ptr_array(d_histogram)[0],
       d_levels[0].size(),
-      castIfHalfPointer(toPtrArray(d_levels).data())[0],
-      num_row_pixels,
-      num_rows,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
+      cast_if_half_pointer(to_ptr_array(d_levels).data())[0],
+      image_desc.width,
+      image_desc.height,
+      image_desc.row_pitch);
+    REQUIRE(error == cudaSuccess);
   }
   else
   {
     const auto error = cub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
       d_temp_storage,
       temp_storage_bytes,
-      castIfHalfPointer(d_samples),
-      toPtrArray(d_histogram).data(),
-      toSizeArray(d_levels).data(),
-      castIfHalfPointer(toPtrArray(d_levels).data()),
-      num_row_pixels,
-      num_rows,
-      row_stride_bytes);
-    CHECK(error == cudaSuccess);
+      cast_if_half_pointer(d_samples),
+      to_ptr_array(d_histogram).data(),
+      to_size_array(d_levels).data(),
+      cast_if_half_pointer(to_ptr_array(d_levels).data()),
+      image_desc.width,
+      image_desc.height,
+      image_desc.row_pitch);
+    REQUIRE(error == cudaSuccess);
   }
 }
 
 template <int Channels,
-          int ActiveChannels,
           typename CounterT,
+          std::size_t ActiveChannels,
           typename SampleT,
           typename TransformOp,
-          typename LevelT,
           typename OffsetT>
 auto compute_reference_result(
-  const SampleT* h_samples,
-  TransformOp&& sample_to_bin_index,
-  const array<c2h::host_vector<LevelT>, ActiveChannels>& levels,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_bytes) -> array<c2h::host_vector<CounterT>, ActiveChannels>
+  const c2h::host_vector<SampleT>& h_samples,
+  const TransformOp& sample_to_bin_index,
+  const array<int, ActiveChannels>& num_levels,
+  ImageDesc<OffsetT> image_desc) -> array<c2h::host_vector<CounterT>, ActiveChannels>
 {
   auto h_histogram = array<c2h::host_vector<CounterT>, ActiveChannels>{};
-  for (int c = 0; c < ActiveChannels; ++c)
+  for (std::size_t c = 0; c < ActiveChannels; ++c)
   {
-    h_histogram[c].resize(levels[c].size() - 1);
+    h_histogram[c].resize(num_levels[c] - 1);
   }
-
-  for (OffsetT row = 0; row < num_rows; ++row)
+  for (OffsetT row = 0; row < image_desc.height; ++row)
   {
-    for (OffsetT pixel = 0; pixel < num_row_pixels; ++pixel)
+    for (OffsetT pixel = 0; pixel < image_desc.width; ++pixel)
     {
-      for (int channel = 0; channel < ActiveChannels; ++channel)
+      for (std::size_t c = 0; c < ActiveChannels; ++c)
       {
         // TODO(bgruber): use an mdspan to access h_samples
-        const auto offset = row * (row_stride_bytes / sizeof(SampleT)) + pixel * Channels + channel;
-        const int bin     = sample_to_bin_index(channel, h_samples[offset]);
-        if (bin >= 0 && bin < static_cast<int>(h_histogram[channel].size())) // if bin is valid
+        const auto offset = row * (image_desc.row_pitch / sizeof(SampleT)) + pixel * Channels + c;
+        const int bin     = sample_to_bin_index(c, h_samples[offset]);
+        if (bin >= 0 && bin < static_cast<int>(h_histogram[c].size())) // if bin is valid
         {
-          ++h_histogram[channel][bin];
+          ++h_histogram[c][bin];
         }
       }
     }
   }
   return h_histogram;
-}
-
-template <int Channels, typename CounterT, int ActiveChannels, typename LevelT, typename OffsetT, typename SampleT>
-void test_histogram_even(
-  c2h::host_vector<SampleT> h_samples,
-  c2h::device_vector<SampleT> d_samples,
-  const array<int, ActiveChannels>& num_levels,
-  const array<LevelT, ActiveChannels>& lower_level,
-  const array<LevelT, ActiveChannels>& upper_level,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_bytes,
-  std::false_type = {})
-{
-  LevelT fp_scales[ActiveChannels]; // only used when LevelT is floating point
-  (void) fp_scales; // TODO(bgruber): use [[maybe_unsued]] in C++17
-
-  for (int c = 0; c < ActiveChannels; ++c)
-  {
-    _CCCL_IF_CONSTEXPR (!std::is_integral<LevelT>::value)
-    {
-      fp_scales[c] =
-        LevelT{1} / static_cast<LevelT>((upper_level[c] - lower_level[c]) / static_cast<LevelT>(num_levels[c] - 1));
-    }
-  }
-
-  auto sample_to_bin_index = [&](int channel, SampleT sample) {
-    const auto n   = num_levels[channel];
-    const auto max = upper_level[channel];
-    const auto min = lower_level[channel];
-    if (sample < min || sample >= max)
-    {
-      return n; // Sample out of range
-    }
-    _CCCL_IF_CONSTEXPR (std::is_integral<LevelT>::value)
-    {
-      // Accurate bin computation following the arithmetic we guarantee in the HistoEven docs
-      return static_cast<int>(
-        static_cast<uint64_t>(sample - min) * static_cast<uint64_t>(n - 1) / static_cast<uint64_t>(max - min));
-    }
-    else
-    {
-      return static_cast<int>((static_cast<float>(sample) - min) * fp_scales[channel]);
-    }
-    _LIBCUDACXX_UNREACHABLE();
-  };
-  auto h_histogram = compute_reference_result<Channels, ActiveChannels, CounterT>(
-    h_samples, sample_to_bin_index, num_levels, num_row_pixels, num_rows, row_stride_bytes);
-
-  // Allocate and initialize device data
-  c2h::device_vector<CounterT> d_histogram[ActiveChannels];
-  for (int channel = 0; channel < ActiveChannels; ++channel)
-  {
-    d_histogram[channel].resize(num_levels[channel] - 1);
-  }
-
-  // TODO(bgruber): replace by launch wrapper, which handles allocation and calling CUB APIs
-
-  size_t temp_storage_bytes = 0;
-  call_even<ActiveChannels, Channels>(
-    nullptr,
-    temp_storage_bytes,
-    d_samples,
-    d_histogram,
-    num_levels,
-    lower_level,
-    upper_level,
-    num_row_pixels,
-    num_rows,
-    row_stride_bytes);
-  constexpr char canary_token = 8;
-  const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
-  auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
-
-  // Run warmup/correctness iteration
-  call_even<ActiveChannels, Channels>(
-    thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
-    temp_storage_bytes,
-    d_samples,
-    d_histogram,
-    num_levels,
-    lower_level,
-    upper_level,
-    num_row_pixels,
-    num_rows,
-    row_stride_bytes);
-
-  // Check canary zones and channel histograms
-  CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
-  CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
-  for (int c = 0; c < ActiveChannels; ++c)
-  {
-    CHECK(h_histogram[c] == d_histogram[c]);
-  }
-}
-
-template <int, typename, typename... Ts>
-void test_histogram_even(Ts&&...)
-{}
-
-template <int Channels, int ActiveChannels, typename SampleT, typename CounterT, typename LevelT, typename OffsetT>
-void test_histogram_range(
-  c2h::host_vector<SampleT> h_samples,
-  c2h::device_vector<SampleT> d_samples,
-  const array<c2h::host_vector<LevelT>, ActiveChannels>& levels,
-  OffsetT num_row_pixels,
-  OffsetT num_rows,
-  OffsetT row_stride_bytes)
-{
-  const auto sample_to_bin_index = [&](int channel, SampleT sample) {
-    const auto* l = levels[channel].data();
-    const auto n  = levels[channel].size();
-    const int bin =
-      static_cast<int>(std::distance(l, std::upper_bound(l, l + n, static_cast<LevelT>(sample))) - 1); // TODO(bgruber):
-                                                                                                       // why not
-                                                                                                       // lower_bound?
-    return bin < 0 ? n : bin;
-  };
-  auto h_histogram = compute_reference_result<Channels, ActiveChannels, CounterT>(
-    h_samples.data(), sample_to_bin_index, levels, num_row_pixels, num_rows, row_stride_bytes);
-
-  // Allocate and initialize device data
-  array<c2h::device_vector<LevelT>, ActiveChannels> d_levels;
-  array<c2h::device_vector<CounterT>, ActiveChannels> d_histogram;
-  for (int c = 0; c < ActiveChannels; ++c)
-  {
-    d_histogram[c].resize(levels[c].size() - 1);
-    d_levels[c] = levels[c];
-  }
-
-  // Allocate temporary storage
-  size_t temp_storage_bytes = 0;
-  call_range<ActiveChannels, Channels>(
-    nullptr,
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_samples.data()),
-    d_histogram,
-    d_levels,
-    num_row_pixels,
-    num_rows,
-    row_stride_bytes);
-
-  // Allocate temporary storage with "canary" zones
-  constexpr char canary_token = 9;
-  const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
-  auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
-
-  // Run warmup/correctness iteration
-  call_range<ActiveChannels, Channels>(
-    thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
-    temp_storage_bytes,
-    thrust::raw_pointer_cast(d_samples.data()),
-    d_histogram,
-    d_levels,
-    num_row_pixels,
-    num_rows,
-    row_stride_bytes);
-
-  // Check canary zones and channel histograms
-  CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
-  CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
-  for (int c = 0; c < ActiveChannels; ++c)
-  {
-    CHECK(h_histogram[c] == d_histogram[c]);
-  }
 }
 
 template <std::size_t ActiveChannels, typename LevelT>
@@ -456,14 +290,14 @@ auto setup_bin_levels_for_range(const array<int, ActiveChannels>& num_levels, Le
   return levels;
 }
 
-template <int ActiveChannels>
+template <std::size_t ActiveChannels>
 auto generate_levels_to_test(int max_level_count) -> array<int, ActiveChannels>
 {
   // TODO(bgruber): eventually, just pick a random number of levels per channel
 
   // first channel tests maximum number of levels, later channels less and less
   array<int, ActiveChannels> r{max_level_count};
-  for (int c = 1; c < ActiveChannels; ++c)
+  for (std::size_t c = 1; c < ActiveChannels; ++c)
   {
     r[c] = r[c - 1] / 2 + 1;
   }
@@ -480,15 +314,29 @@ struct bit_and_anything
   }
 };
 
-template <typename SampleT, int Channels, int ActiveChannels, typename CounterT, typename LevelT, typename OffsetT>
-void test_even_and_range(
-  LevelT max_level, int max_level_count, OffsetT num_row_pixels, OffsetT num_rows, int entropy_reduction = 0)
+template <typename SampleT, int Channels, std::size_t ActiveChannels, typename CounterT, typename LevelT, typename OffsetT>
+void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, OffsetT height, int entropy_reduction = 0)
 {
-  const OffsetT row_stride_bytes =
-    num_row_pixels * Channels * sizeof(SampleT) + static_cast<OffsetT>(GENERATE(std::size_t{0}, 13 * sizeof(SampleT)));
+  CAPTURE(
+    c2h::type_name<SampleT>(),
+    c2h::type_name<CounterT>(),
+    c2h::type_name<LevelT>(),
+    c2h::type_name<OffsetT>(),
+    Channels,
+    ActiveChannels,
+    max_level,
+    max_level_count,
+    width,
+    height,
+    entropy_reduction);
+
+  // Prepare input image (samples)
+  const OffsetT row_pitch =
+    width * Channels * sizeof(SampleT) + static_cast<OffsetT>(GENERATE(std::size_t{0}, 13 * sizeof(SampleT)));
+  const auto image_desc = ImageDesc<OffsetT>{width, height, row_pitch};
   const auto num_levels = generate_levels_to_test<ActiveChannels>(max_level_count);
 
-  const OffsetT total_samples = num_rows * (row_stride_bytes / sizeof(SampleT));
+  const OffsetT total_samples = height * (row_pitch / sizeof(SampleT));
   c2h::device_vector<SampleT> d_samples;
   d_samples.resize(total_samples);
 
@@ -507,19 +355,138 @@ void test_even_and_range(
     }
   }
 
-  c2h::host_vector<SampleT> h_samples = d_samples;
+  auto h_samples = c2h::host_vector<SampleT>(d_samples);
+
+  // Allocate output histogram
+  auto d_histogram = cuda::std::array<c2h::device_vector<CounterT>, ActiveChannels>();
+  for (std::size_t c = 0; c < ActiveChannels; ++c)
+  {
+    d_histogram[c].resize(num_levels[c] - 1);
+  }
 
   SECTION("HistogramEven")
   {
-    const auto levels = setup_bin_levels_for_even(num_levels, max_level, max_level_count);
-    test_histogram_even<Channels, CounterT>(
-      h_samples, d_samples, num_levels, levels[0], levels[1], num_row_pixels, num_rows, row_stride_bytes);
+    // Setup levels
+    const auto levels       = setup_bin_levels_for_even(num_levels, max_level, max_level_count);
+    const auto& lower_level = levels[0]; // TODO(bgruber): use structured bindings in C++17
+    const auto& upper_level = levels[1];
+
+    // Compute reference result
+    auto fp_scales = ::cuda::std::array<LevelT, ActiveChannels>{}; // only used when LevelT is floating point
+    (void) fp_scales; // TODO(bgruber): use [[maybe_unsued]] in C++17
+    for (std::size_t c = 0; c < ActiveChannels; ++c)
+    {
+      _CCCL_IF_CONSTEXPR (!std::is_integral<LevelT>::value)
+      {
+        fp_scales[c] =
+          LevelT{1} / static_cast<LevelT>((upper_level[c] - lower_level[c]) / static_cast<LevelT>(num_levels[c] - 1));
+      }
+    }
+
+    auto sample_to_bin_index = [&](int channel, SampleT sample) {
+      using common_t             = typename ::cuda::std::common_type<LevelT, SampleT>::type;
+      const auto n               = num_levels[channel];
+      const auto max             = static_cast<common_t>(upper_level[channel]);
+      const auto min             = static_cast<common_t>(lower_level[channel]);
+      const auto promoted_sample = static_cast<common_t>(sample);
+      if (promoted_sample < min || promoted_sample >= max)
+      {
+        return n; // out of range
+      }
+      _CCCL_IF_CONSTEXPR (std::is_integral<LevelT>::value)
+      {
+        // Accurate bin computation following the arithmetic we guarantee in the HistoEven docs
+        return static_cast<int>(static_cast<uint64_t>(promoted_sample - min) * static_cast<uint64_t>(n - 1)
+                                / static_cast<uint64_t>(max - min));
+      }
+      else
+      {
+        return static_cast<int>((static_cast<float>(sample) - min) * fp_scales[channel]);
+      }
+      _LIBCUDACXX_UNREACHABLE();
+    };
+    auto h_histogram =
+      compute_reference_result<Channels, CounterT>(h_samples, sample_to_bin_index, num_levels, image_desc);
+
+    // TODO(bgruber): replace by launch wrapper, which handles allocation and calling CUB APIs
+
+    // Compute result
+    size_t temp_storage_bytes = 0;
+    call_even<Channels>(
+      nullptr,
+      temp_storage_bytes,
+      thrust::raw_pointer_cast(d_samples.data()),
+      d_histogram,
+      num_levels,
+      lower_level,
+      upper_level,
+      image_desc);
+    constexpr char canary_token = 8;
+    const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
+    auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
+    call_even<Channels>(
+      thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
+      temp_storage_bytes,
+      thrust::raw_pointer_cast(d_samples.data()),
+      d_histogram,
+      num_levels,
+      lower_level,
+      upper_level,
+      image_desc);
+
+    // Check canary zones and channel histograms
+    CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
+    CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
+    for (std::size_t c = 0; c < ActiveChannels; ++c)
+    {
+      CHECK(h_histogram[c] == d_histogram[c]);
+    }
   }
+
   SECTION("HistogramRange")
   {
-    const auto levels = setup_bin_levels_for_range(num_levels, max_level, max_level_count);
-    test_histogram_range<Channels, ActiveChannels, SampleT, CounterT, LevelT, OffsetT>(
-      h_samples, d_samples, levels, num_row_pixels, num_rows, row_stride_bytes);
+    // Setup levels
+    const auto h_levels = setup_bin_levels_for_range(num_levels, max_level, max_level_count);
+    auto d_levels       = array<c2h::device_vector<LevelT>, ActiveChannels>{};
+    std::copy(h_levels.begin(), h_levels.end(), d_levels.begin());
+
+    // Compute reference result
+    const auto sample_to_bin_index = [&](int channel, SampleT sample) {
+      const auto* l = h_levels[channel].data();
+      const auto n  = h_levels[channel].size();
+      const int bin = static_cast<int>(
+        std::distance(l, std::upper_bound(l, l + n, static_cast<LevelT>(sample))) - 1); // TODO(bgruber):
+                                                                                        // why not
+                                                                                        // lower_bound?
+      return bin < 0 ? n : bin;
+    };
+    auto h_histogram =
+      compute_reference_result<Channels, CounterT>(h_samples, sample_to_bin_index, num_levels, image_desc);
+
+    // Compute result
+    size_t temp_storage_bytes = 0;
+    call_range<Channels>(
+      nullptr, temp_storage_bytes, thrust::raw_pointer_cast(d_samples.data()), d_histogram, d_levels, image_desc);
+
+    constexpr char canary_token = 9;
+    const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
+    auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
+
+    call_range<Channels>(
+      thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
+      temp_storage_bytes,
+      thrust::raw_pointer_cast(d_samples.data()),
+      d_histogram,
+      d_levels,
+      image_desc);
+
+    // Check canary zones and channel histograms
+    CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
+    CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
+    for (std::size_t c = 0; c < ActiveChannels; ++c)
+    {
+      CHECK(h_histogram[c] == d_histogram[c]);
+    }
   }
 }
 
@@ -597,7 +564,7 @@ CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][dev
   const auto height             = 30;
   constexpr auto Channels       = 4;
   constexpr auto ActiveChannels = 3;
-  const auto row_stride_bytes   = (width + padding) * Channels * static_cast<int>(sizeof(sample_t));
+  const auto row_pitch          = (width + padding) * Channels * static_cast<int>(sizeof(sample_t));
   const auto total_values       = (width + padding) * Channels * height;
 
   const auto num_levels  = array<int, ActiveChannels>{11, 3, 2};
@@ -611,7 +578,7 @@ CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][dev
   // Channel #2: 2, 6, 10, 14
   // unused:     3, 7, 11, 15
 
-  auto d_histogram = array<c2h::device_vector<int>, ActiveChannels>{};
+  auto d_histogram = array<c2h::device_vector<int>, ActiveChannels>();
   for (int c = 0; c < ActiveChannels; ++c)
   {
     d_histogram[c].resize(num_levels[c] - 1);
@@ -619,13 +586,13 @@ CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][dev
 
   multi_histogram_even<Channels, ActiveChannels>(
     sample_iterator,
-    toPtrArray(d_histogram).data(),
+    to_ptr_array(d_histogram).data(),
     num_levels.data(),
     lower_level.data(),
     upper_level.data(),
     width,
     height,
-    row_stride_bytes);
+    row_pitch);
 
   // TODO(bgruber): move detail::to_vec into namespace c2h?
   CHECK(detail::to_vec(d_histogram[0]) == std::vector<int>(10, (width * height) / 10));
