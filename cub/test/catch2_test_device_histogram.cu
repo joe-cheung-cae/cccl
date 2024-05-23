@@ -116,97 +116,6 @@ auto to_size_array(const array<C, N>& in) -> array<int, N>
   return r;
 }
 
-template <typename OffsetT>
-struct ImageDesc
-{
-  OffsetT width;
-  OffsetT height;
-  OffsetT row_pitch; // in bytes
-};
-
-template <int Channels, std::size_t ActiveChannels, typename SampleT, typename CounterT, typename LevelT, typename OffsetT>
-void call_even(
-  void* d_temp_storage,
-  size_t& temp_storage_bytes,
-  const SampleT* d_samples,
-  array<c2h::device_vector<CounterT>, ActiveChannels>& d_histogram,
-  const array<int, ActiveChannels>& num_levels,
-  const array<LevelT, ActiveChannels>& lower_level,
-  const array<LevelT, ActiveChannels>& upper_level,
-  ImageDesc<OffsetT> image_desc)
-{
-  // TODO(bgruber): use launch wrapper
-  _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
-  {
-    const auto error = cub::DeviceHistogram::HistogramEven(
-      d_temp_storage,
-      temp_storage_bytes,
-      cast_if_half_pointer(d_samples),
-      to_ptr_array(d_histogram)[0],
-      num_levels[0],
-      cast_if_half_pointer(lower_level.data())[0],
-      cast_if_half_pointer(upper_level.data())[0],
-      image_desc.width,
-      image_desc.height,
-      image_desc.row_pitch);
-    REQUIRE(error == cudaSuccess);
-  }
-  else
-  {
-    const auto error = cub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-      d_temp_storage,
-      temp_storage_bytes,
-      cast_if_half_pointer(d_samples),
-      to_ptr_array(d_histogram).data(),
-      num_levels.data(),
-      cast_if_half_pointer(lower_level.data()),
-      cast_if_half_pointer(upper_level.data()),
-      image_desc.width,
-      image_desc.height,
-      image_desc.row_pitch);
-    REQUIRE(error == cudaSuccess);
-  }
-}
-
-template <int Channels, std::size_t ActiveChannels, typename SampleT, typename CounterT, typename LevelT, typename OffsetT>
-void call_range(void* d_temp_storage,
-                size_t& temp_storage_bytes,
-                const SampleT* d_samples,
-                array<c2h::device_vector<CounterT>, ActiveChannels>& d_histogram,
-                const array<c2h::device_vector<LevelT>, ActiveChannels>& d_levels,
-                ImageDesc<OffsetT> image_desc)
-{
-  // TODO(bgruber): use launch wrapper
-  _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
-  {
-    const auto error = cub::DeviceHistogram::HistogramRange(
-      d_temp_storage,
-      temp_storage_bytes,
-      cast_if_half_pointer(d_samples),
-      to_ptr_array(d_histogram)[0],
-      d_levels[0].size(),
-      cast_if_half_pointer(to_ptr_array(d_levels).data())[0],
-      image_desc.width,
-      image_desc.height,
-      image_desc.row_pitch);
-    REQUIRE(error == cudaSuccess);
-  }
-  else
-  {
-    const auto error = cub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
-      d_temp_storage,
-      temp_storage_bytes,
-      cast_if_half_pointer(d_samples),
-      to_ptr_array(d_histogram).data(),
-      to_size_array(d_levels).data(),
-      cast_if_half_pointer(to_ptr_array(d_levels).data()),
-      image_desc.width,
-      image_desc.height,
-      image_desc.row_pitch);
-    REQUIRE(error == cudaSuccess);
-  }
-}
-
 template <int Channels,
           typename CounterT,
           std::size_t ActiveChannels,
@@ -217,21 +126,23 @@ auto compute_reference_result(
   const c2h::host_vector<SampleT>& h_samples,
   const TransformOp& sample_to_bin_index,
   const array<int, ActiveChannels>& num_levels,
-  ImageDesc<OffsetT> image_desc) -> array<c2h::host_vector<CounterT>, ActiveChannels>
+  OffsetT width,
+  OffsetT height,
+  OffsetT row_pitch) -> array<c2h::host_vector<CounterT>, ActiveChannels>
 {
   auto h_histogram = array<c2h::host_vector<CounterT>, ActiveChannels>{};
   for (std::size_t c = 0; c < ActiveChannels; ++c)
   {
     h_histogram[c].resize(num_levels[c] - 1);
   }
-  for (OffsetT row = 0; row < image_desc.height; ++row)
+  for (OffsetT row = 0; row < height; ++row)
   {
-    for (OffsetT pixel = 0; pixel < image_desc.width; ++pixel)
+    for (OffsetT pixel = 0; pixel < width; ++pixel)
     {
       for (std::size_t c = 0; c < ActiveChannels; ++c)
       {
         // TODO(bgruber): use an mdspan to access h_samples
-        const auto offset = row * (image_desc.row_pitch / sizeof(SampleT)) + pixel * Channels + c;
+        const auto offset = row * (row_pitch / sizeof(SampleT)) + pixel * Channels + c;
         const int bin     = sample_to_bin_index(c, h_samples[offset]);
         if (bin >= 0 && bin < static_cast<int>(h_histogram[c].size())) // if bin is valid
         {
@@ -333,7 +244,6 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
   // Prepare input image (samples)
   const OffsetT row_pitch =
     width * Channels * sizeof(SampleT) + static_cast<OffsetT>(GENERATE(std::size_t{0}, 13 * sizeof(SampleT)));
-  const auto image_desc = ImageDesc<OffsetT>{width, height, row_pitch};
   const auto num_levels = generate_levels_to_test<ActiveChannels>(max_level_count);
 
   const OffsetT total_samples = height * (row_pitch / sizeof(SampleT));
@@ -405,38 +315,36 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
       }
       _LIBCUDACXX_UNREACHABLE();
     };
-    auto h_histogram =
-      compute_reference_result<Channels, CounterT>(h_samples, sample_to_bin_index, num_levels, image_desc);
+    auto h_histogram = compute_reference_result<Channels, CounterT>(
+      h_samples, sample_to_bin_index, num_levels, width, height, row_pitch);
 
     // TODO(bgruber): replace by launch wrapper, which handles allocation and calling CUB APIs
 
-    // Compute result
-    size_t temp_storage_bytes = 0;
-    call_even<Channels>(
-      nullptr,
-      temp_storage_bytes,
-      thrust::raw_pointer_cast(d_samples.data()),
-      d_histogram,
-      num_levels,
-      lower_level,
-      upper_level,
-      image_desc);
-    constexpr char canary_token = 8;
-    const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
-    auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
-    call_even<Channels>(
-      thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
-      temp_storage_bytes,
-      thrust::raw_pointer_cast(d_samples.data()),
-      d_histogram,
-      num_levels,
-      lower_level,
-      upper_level,
-      image_desc);
-
-    // Check canary zones and channel histograms
-    CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
-    CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
+    // Compute result and verify
+    _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
+    {
+      histogram_even(
+        cast_if_half_pointer(thrust::raw_pointer_cast(d_samples.data())),
+        to_ptr_array(d_histogram)[0],
+        num_levels[0],
+        cast_if_half_pointer(lower_level.data())[0],
+        cast_if_half_pointer(upper_level.data())[0],
+        width,
+        height,
+        row_pitch);
+    }
+    else
+    {
+      multi_histogram_even<Channels, ActiveChannels>(
+        cast_if_half_pointer(thrust::raw_pointer_cast(d_samples.data())),
+        to_ptr_array(d_histogram).data(),
+        num_levels.data(),
+        cast_if_half_pointer(lower_level.data()),
+        cast_if_half_pointer(upper_level.data()),
+        width,
+        height,
+        row_pitch);
+    }
     for (std::size_t c = 0; c < ActiveChannels; ++c)
     {
       CHECK(h_histogram[c] == d_histogram[c]);
@@ -460,36 +368,38 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
                                                                                         // lower_bound?
       return bin < 0 ? n : bin;
     };
-    auto h_histogram =
-      compute_reference_result<Channels, CounterT>(h_samples, sample_to_bin_index, num_levels, image_desc);
+    auto h_histogram = compute_reference_result<Channels, CounterT>(
+      h_samples, sample_to_bin_index, num_levels, width, height, row_pitch);
 
-    // Compute result
-    size_t temp_storage_bytes = 0;
-    call_range<Channels>(
-      nullptr, temp_storage_bytes, thrust::raw_pointer_cast(d_samples.data()), d_histogram, d_levels, image_desc);
-
-    constexpr char canary_token = 9;
-    const auto canary_zone      = c2h::host_vector<char>(256, canary_token);
-    auto d_temp_storage         = c2h::device_vector<char>(temp_storage_bytes + canary_zone.size() * 2, canary_token);
-
-    call_range<Channels>(
-      thrust::raw_pointer_cast(d_temp_storage.data()) + canary_zone.size(),
-      temp_storage_bytes,
-      thrust::raw_pointer_cast(d_samples.data()),
-      d_histogram,
-      d_levels,
-      image_desc);
-
-    // Check canary zones and channel histograms
-    CHECK(c2h::host_vector<char>(d_temp_storage.begin(), d_temp_storage.begin() + canary_zone.size()) == canary_zone);
-    CHECK(c2h::host_vector<char>(d_temp_storage.end() - canary_zone.size(), d_temp_storage.end()) == canary_zone);
+    // Compute result and verify
+    _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
+    {
+      histogram_range(
+        cast_if_half_pointer(thrust::raw_pointer_cast(d_samples.data())),
+        to_ptr_array(d_histogram)[0],
+        d_levels[0].size(),
+        cast_if_half_pointer(to_ptr_array(d_levels).data())[0],
+        width,
+        height,
+        row_pitch);
+    }
+    else
+    {
+      multi_histogram_range<Channels, ActiveChannels>(
+        cast_if_half_pointer(thrust::raw_pointer_cast(d_samples.data())),
+        to_ptr_array(d_histogram).data(),
+        to_size_array(d_levels).data(),
+        cast_if_half_pointer(to_ptr_array(d_levels).data()),
+        width,
+        height,
+        row_pitch);
+    }
     for (std::size_t c = 0; c < ActiveChannels; ++c)
     {
       CHECK(h_histogram[c] == d_histogram[c]);
     }
   }
 }
-
 using types =
   c2h::type_list<std::int8_t,
                  std::uint8_t,
@@ -505,22 +415,23 @@ using types =
                  float,
                  double>;
 
-CUB_TEST("DeviceHistogram::Histogram* basic use", "[histogram_even][histogram_range][device]", types)
+CUB_TEST("DeviceHistogram::Histogram* basic use", "[histogram][device]", types)
 {
   using sample_t = c2h::get<0, TestType>;
-  using level_t  = typename std::conditional<std::is_floating_point<sample_t>::value, sample_t, int>::type;
+  using level_t =
+    typename std::conditional<cub::NumericTraits<sample_t>::CATEGORY == cub::FLOATING_POINT, sample_t, int>::type;
   test_even_and_range<sample_t, 4, 3, int>(level_t{256}, 256 + 1, 1920, 1080);
 }
 
 // This test covers int32 and int64 arithmetic for bin computation
-CUB_TEST("DeviceHistogram::Histogram* levels cover type range", "[histogram_even][histogram_range][device]", types)
+CUB_TEST("DeviceHistogram::Histogram* levels cover type range", "[histogram][device]", types)
 {
   using sample_t = c2h::get<0, TestType>;
   using level_t  = sample_t;
   test_even_and_range<sample_t, 4, 3, int>(std::numeric_limits<level_t>::max(), 255, 1920, 1080);
 }
 
-CUB_TEST("DeviceHistogram::Histogram* odd image sizes", "[histogram_even][histogram_range][device]")
+CUB_TEST("DeviceHistogram::Histogram* odd image sizes", "[histogram][device]")
 {
   using sample_t                = int;
   using level_t                 = int;
@@ -532,7 +443,7 @@ CUB_TEST("DeviceHistogram::Histogram* odd image sizes", "[histogram_even][histog
   test_even_and_range<sample_t, 4, 3, int, level_t, int>(max_level, max_level_count, p.first, p.second);
 }
 
-CUB_TEST("DeviceHistogram::Histogram* entropy", "[histogram_even][histogram_range][device]")
+CUB_TEST("DeviceHistogram::Histogram* entropy", "[histogram][device]")
 {
   // TODO(bgruber): what numbers to put here? radix_sort_keys has GENERATE(1, 3, 9, 15);
   const int entropy_reduction = GENERATE(-1, 5); // entropy_reduction = -1 -> all samples == 0
@@ -547,7 +458,7 @@ struct ChannelConfig
 };
 
 CUB_TEST_LIST("DeviceHistogram::Histogram* channel configs",
-              "[histogram_even][histogram_range][device]",
+              "[histogram][device]",
               ChannelConfig<1, 1>,
               ChannelConfig<3, 3>,
               ChannelConfig<4, 3>,
@@ -601,12 +512,12 @@ CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][dev
 }
 
 // Regression: https://github.com/NVIDIA/cub/issues/479
-CUB_TEST("DeviceHistogram::Histogram* regression NVIDIA/cub#479", "[histogram_even][histogram_range][device]")
+CUB_TEST("DeviceHistogram::Histogram* regression NVIDIA/cub#479", "[histogram][device]")
 {
   test_even_and_range<float, 4, 3, int>(12, 7, 1920, 1080);
 }
 
-CUB_TEST("DeviceHistogram::Histogram* down-conversion size_t to int", "[histogram_even][histogram_range][device]")
+CUB_TEST("DeviceHistogram::Histogram* down-conversion size_t to int", "[histogram][device]")
 {
   _CCCL_IF_CONSTEXPR (sizeof(std::size_t) != sizeof(int))
   {
