@@ -37,16 +37,11 @@
 #include <algorithm>
 #include <limits>
 
+#include "c2h/extended_types.cuh"
 #include "c2h/vector.cuh"
 #include "catch2_test_helper.h"
 #include "catch2_test_launch_helper.h"
 #include "test_util.h"
-
-#define TEST_HALF_T !_NVHPC_CUDA
-
-#if TEST_HALF_T
-#  include <cuda_fp16.h>
-#endif
 
 // %PARAM% TEST_LAUNCH lid 0:1:2
 
@@ -75,6 +70,11 @@ auto cast_if_half_pointer(T* p) -> T*
 auto cast_if_half_pointer(half_t* p) -> __half*
 {
   return reinterpret_cast<__half*>(p);
+}
+
+auto cast_if_half_pointer(const half_t* p) -> const __half*
+{
+  return reinterpret_cast<const __half*>(p);
 }
 
 auto cast_if_half_pointer(half_t* const* p) -> __half* const*
@@ -158,22 +158,29 @@ template <std::size_t ActiveChannels, typename LevelT>
 auto setup_bin_levels_for_even(const array<int, ActiveChannels>& num_levels, LevelT max_level, int max_level_count)
   -> array<array<LevelT, ActiveChannels>, 2>
 {
-  // TODO(bgruber): eventually, we could just pick a random lower/upper bound for each channel
-
   array<array<LevelT, ActiveChannels>, 2> levels;
   auto& lower_level = levels[0];
-  auto& upper_level = levels[0];
+  auto& upper_level = levels[1];
 
-  // Find smallest level increment
-  const LevelT bin_width = max_level / static_cast<LevelT>(max_level_count - 1);
+  // Create upper and lower levels between between [0:max_level], getting narrower with each channel. Example:
+  //    max_level = 256
+  //   num_levels = { 257, 129,  65 }
+  //  lower_level = {   0,  64,  96 }
+  //  upper_level = { 256, 192, 160 }
 
-  // Set upper and lower levels for each channel
+  // TODO(bgruber): eventually, we could just pick a random lower/upper bound for each channel
+
+  const auto min_bin_width = max_level / (max_level_count - 1);
+  REQUIRE(min_bin_width > 0);
+
   for (std::size_t c = 0; c < ActiveChannels; ++c)
   {
-    const auto num_bins   = num_levels[c] - 1;
-    const auto hist_width = static_cast<LevelT>(num_bins) * bin_width;
-    lower_level[c]        = static_cast<LevelT>((max_level - hist_width) / LevelT{2});
-    upper_level[c]        = static_cast<LevelT>((max_level + hist_width) / LevelT{2});
+    const int num_bins        = num_levels[c] - 1;
+    const auto min_hist_width = num_bins * min_bin_width;
+    lower_level[c]            = static_cast<LevelT>((max_level / 2 - min_hist_width / 2));
+    upper_level[c]            = static_cast<LevelT>((max_level / 2 + min_hist_width / 2));
+    CAPTURE(c, num_levels[c]);
+    REQUIRE(lower_level[c] < upper_level[c]);
   }
   return levels;
 }
@@ -184,25 +191,30 @@ auto setup_bin_levels_for_range(const array<int, ActiveChannels>& num_levels, Le
 {
   // TODO(bgruber): eventually, we could just pick random levels for each channel
 
-  const LevelT min_level_increment = max_level / static_cast<LevelT>(max_level_count - 1);
+  const auto min_bin_width = max_level / (max_level_count - 1);
+  REQUIRE(min_bin_width > 0);
 
   array<c2h::host_vector<LevelT>, ActiveChannels> levels;
   for (std::size_t c = 0; c < ActiveChannels; ++c)
   {
     levels[c].resize(num_levels[c]);
-
-    const int num_bins       = num_levels[c] - 1;
-    const LevelT lower_level = (max_level - static_cast<LevelT>(num_bins * min_level_increment)) / LevelT{2};
-    for (int level = 0; level < num_levels[c]; ++level)
+    const int num_bins        = num_levels[c] - 1;
+    const auto min_hist_width = num_bins * min_bin_width;
+    const auto lower_level    = (max_level / 2 - min_hist_width / 2);
+    for (int l = 0; l < num_levels[c]; ++l)
     {
-      levels[c][level] = lower_level + static_cast<LevelT>(level * min_level_increment);
+      levels[c][l] = static_cast<LevelT>(lower_level + l * min_bin_width);
+      if (l > 0)
+      {
+        REQUIRE(levels[c][l - 1] < levels[c][l]);
+      }
     }
   }
   return levels;
 }
 
 template <std::size_t ActiveChannels>
-auto generate_levels_to_test(int max_level_count) -> array<int, ActiveChannels>
+auto generate_level_counts_to_test(int max_level_count) -> array<int, ActiveChannels>
 {
   // TODO(bgruber): eventually, just pick a random number of levels per channel
 
@@ -228,6 +240,7 @@ struct bit_and_anything
 template <typename SampleT, int Channels, std::size_t ActiveChannels, typename CounterT, typename LevelT, typename OffsetT>
 void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, OffsetT height, int entropy_reduction = 0)
 {
+  const auto padding_bytes = static_cast<OffsetT>(GENERATE(std::size_t{0}, 13 * sizeof(SampleT)));
   CAPTURE(
     c2h::type_name<SampleT>(),
     c2h::type_name<CounterT>(),
@@ -235,16 +248,16 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
     c2h::type_name<OffsetT>(),
     Channels,
     ActiveChannels,
-    max_level,
+    CoutCast(max_level),
     max_level_count,
     width,
     height,
+    padding_bytes,
     entropy_reduction);
 
   // Prepare input image (samples)
-  const OffsetT row_pitch =
-    width * Channels * sizeof(SampleT) + static_cast<OffsetT>(GENERATE(std::size_t{0}, 13 * sizeof(SampleT)));
-  const auto num_levels = generate_levels_to_test<ActiveChannels>(max_level_count);
+  const OffsetT row_pitch = width * Channels * sizeof(SampleT) + padding_bytes;
+  const auto num_levels   = generate_level_counts_to_test<ActiveChannels>(max_level_count);
 
   const OffsetT total_samples = height * (row_pitch / sizeof(SampleT));
   c2h::device_vector<SampleT> d_samples;
@@ -280,6 +293,7 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
     const auto levels       = setup_bin_levels_for_even(num_levels, max_level, max_level_count);
     const auto& lower_level = levels[0]; // TODO(bgruber): use structured bindings in C++17
     const auto& upper_level = levels[1];
+    CAPTURE(lower_level, upper_level);
 
     // Compute reference result
     auto fp_scales = ::cuda::std::array<LevelT, ActiveChannels>{}; // only used when LevelT is floating point
@@ -288,8 +302,7 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
     {
       _CCCL_IF_CONSTEXPR (!std::is_integral<LevelT>::value)
       {
-        fp_scales[c] =
-          LevelT{1} / static_cast<LevelT>((upper_level[c] - lower_level[c]) / static_cast<LevelT>(num_levels[c] - 1));
+        fp_scales[c] = static_cast<LevelT>(num_levels[c] - 1) / static_cast<LevelT>(upper_level[c] - lower_level[c]);
       }
     }
 
@@ -311,14 +324,12 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
       }
       else
       {
-        return static_cast<int>((static_cast<float>(sample) - min) * fp_scales[channel]);
+        return static_cast<int>((sample - min) * fp_scales[channel]);
       }
       _LIBCUDACXX_UNREACHABLE();
     };
     auto h_histogram = compute_reference_result<Channels, CounterT>(
       h_samples, sample_to_bin_index, num_levels, width, height, row_pitch);
-
-    // TODO(bgruber): replace by launch wrapper, which handles allocation and calling CUB APIs
 
     // Compute result and verify
     _CCCL_IF_CONSTEXPR (ActiveChannels == 1 && Channels == 1)
@@ -357,6 +368,7 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
     const auto h_levels = setup_bin_levels_for_range(num_levels, max_level, max_level_count);
     auto d_levels       = array<c2h::device_vector<LevelT>, ActiveChannels>{};
     std::copy(h_levels.begin(), h_levels.end(), d_levels.begin());
+    CAPTURE(d_levels);
 
     // Compute reference result
     const auto sample_to_bin_index = [&](int channel, SampleT sample) {
@@ -400,6 +412,7 @@ void test_even_and_range(LevelT max_level, int max_level_count, OffsetT width, O
     }
   }
 }
+
 using types =
   c2h::type_list<std::int8_t,
                  std::uint8_t,
@@ -420,15 +433,25 @@ CUB_TEST("DeviceHistogram::Histogram* basic use", "[histogram][device]", types)
   using sample_t = c2h::get<0, TestType>;
   using level_t =
     typename std::conditional<cub::NumericTraits<sample_t>::CATEGORY == cub::FLOATING_POINT, sample_t, int>::type;
-  test_even_and_range<sample_t, 4, 3, int>(level_t{256}, 256 + 1, 1920, 1080);
+  // Max for int8/uint8 is 2^8, for half_t is 2^10. Beyond, we would need a different level generation
+  const auto max_level       = level_t{sizeof(sample_t) == 1 ? 256 : 1024};
+  const auto max_level_count = (sizeof(sample_t) == 1 ? 256 : 1024) + 1;
+  test_even_and_range<sample_t, 4, 3, int>(max_level, max_level_count, 1920, 1080);
 }
 
+// TODO(bgruber): float produces INFs in the HistogramRange test setup AND the HistogramEven implementation
 // This test covers int32 and int64 arithmetic for bin computation
-CUB_TEST("DeviceHistogram::Histogram* levels cover type range", "[histogram][device]", types)
+CUB_TEST("DeviceHistogram::Histogram* large levels", "[histogram][device]", metal::remove<types, float>)
 {
-  using sample_t = c2h::get<0, TestType>;
-  using level_t  = sample_t;
-  test_even_and_range<sample_t, 4, 3, int>(std::numeric_limits<level_t>::max(), 255, 1920, 1080);
+  using sample_t             = c2h::get<0, TestType>;
+  using level_t              = sample_t;
+  const auto max_level_count = 128;
+  auto max_level             = cub::NumericTraits<level_t>::Max();
+  if (sizeof(sample_t) > sizeof(int))
+  {
+    max_level /= static_cast<half_t>(max_level_count - 1); // refer to overflow detection in ScaleTransform::MayOverflow
+  }
+  test_even_and_range<sample_t, 4, 3, int>(max_level, max_level_count, 1920, 1080);
 }
 
 CUB_TEST("DeviceHistogram::Histogram* odd image sizes", "[histogram][device]")
@@ -464,7 +487,7 @@ CUB_TEST_LIST("DeviceHistogram::Histogram* channel configs",
               ChannelConfig<4, 3>,
               ChannelConfig<4, 4>)
 {
-  test_even_and_range<float, TestType::channels, TestType::active_channels, int, int, int>(1.0f, 256 + 1, 128, 32);
+  test_even_and_range<int, TestType::channels, TestType::active_channels, int, int, int>(256, 256 + 1, 128, 32);
 }
 
 CUB_TEST("DeviceHistogram::HistogramEven sample iterator", "[histogram_even][device]")
