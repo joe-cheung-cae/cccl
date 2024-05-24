@@ -42,7 +42,21 @@ source "$(dirname "$0")/build_common.sh"
 
 print_environment_details
 
-./build_cub.sh "$@"
+if true; then # [ -n "${GITHUB_ACTIONS:-}" ]; then
+  sudo apt update
+  sudo apt install -y pbzip2
+  start_time=$SECONDS
+
+  pushd .. > /dev/null
+  echo "Unpacking output artifact in $(pwd)"
+  ls -lh output_artifact.tar.bz2
+  md5sum output_artifact.tar.bz2
+  pbzip2 -dc output_artifact.tar.bz2 | tar xvf -
+  popd > /dev/null
+  echo "Extracting output artifact took $((SECONDS - start_time)) seconds"
+else
+  ./build_cub.sh "$@"
+fi
 
 PRESETS=(
   "cub-nolid-cpp$CXX_STANDARD"
