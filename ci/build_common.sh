@@ -247,7 +247,7 @@ function test_preset()
     local ctest_log="${preset_dir}/ctest.log"
 
     pushd .. > /dev/null
-    run_command "$GROUP_NAME" ctest --output-log "${ctest_log}" --preset=$PRESET
+    run_command "$GROUP_NAME" ctest --output-log "${ctest_log}" --preset=$PRESET -VV --debug
     status=$?
     popd > /dev/null
 
