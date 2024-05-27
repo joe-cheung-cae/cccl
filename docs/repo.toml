@@ -233,6 +233,6 @@ doxygen_conf_extra = """
   EXAMPLE_PATH           = ../../thrust/examples
   EXAMPLE_RECURSIVE      = NO
   EXAMPLE_PATTERNS       = *.cu
-  EXCLUDE_SYMBOLS        = "*detail*" "__*" "optional"
+  EXCLUDE_SYMBOLS        = "*detail*" "__*" "THRUST_NS_QUALIFIER" "optional"
   AUTOLINK_SUPPORT       = YES
 """
